@@ -1,0 +1,14 @@
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# virtual environment
+.venv*
+
+# project specific
+FBNN
+GPflow-Slim
