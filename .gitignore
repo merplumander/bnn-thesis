@@ -12,3 +12,5 @@ __pycache__/
 # project specific
 FBNN
 GPflow-Slim
+zhusuan
+figures
