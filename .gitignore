@@ -13,4 +13,6 @@ __pycache__/
 FBNN
 GPflow-Slim
 zhusuan
+thermo
 figures
+logs
