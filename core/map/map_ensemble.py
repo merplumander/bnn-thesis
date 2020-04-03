@@ -1,7 +1,6 @@
-import numpy as np
 import tensorflow as tf
 
-from .network_utils import build_model
+from .network_utils import build_keras_model
 
 
 class MapEnsemble:
@@ -38,10 +37,11 @@ class MapEnsemble:
             for i in range(self.n_networks)
         ]
 
-    def train(self, x_train, y_train, batch_size, epochs=120):
+    def fit(self, x_train, y_train, batch_size, epochs=120):
         tf.random.set_seed(self.seed)
         for network in self.networks:
-            network.train(x_train, y_train, batch_size=batch_size, epochs=epochs)
+            network.fit(x_train, y_train, batch_size=batch_size, epochs=epochs)
+        return self
 
     def predict(self, x_test):
         predictions = []
@@ -66,7 +66,7 @@ class MapNetwork:
         self.learning_rate = learning_rate
         self.seed = seed
         tf.random.set_seed(self.seed)
-        self.network = build_model(
+        self.network = build_keras_model(
             self.input_shape, self.layer_units, self.layer_activations
         )
 
@@ -75,9 +75,10 @@ class MapNetwork:
             loss="mean_squared_error",
         )
 
-    def train(self, x_train, y_train, batch_size, epochs=120):
+    def fit(self, x_train, y_train, batch_size, epochs=120):
         tf.random.set_seed(self.seed)
         self.network.fit(x_train, y_train, epochs=epochs, batch_size=batch_size)
+        return self
 
     def predict(self, x_test):
         prediction = self.network(x_test)

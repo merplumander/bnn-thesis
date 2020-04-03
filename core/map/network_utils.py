@@ -2,12 +2,12 @@ import numpy as np
 import tensorflow as tf
 
 
-def build_model(
+def build_keras_model(
     input_shape=[1],
     layer_units=[200, 100, 1],
     layer_activations=["relu", "relu", "linear"],
 ):
-    """Building an uncompiled tensorflow model with the architecture given"""
+    """Building an uncompiled keras tensorflow model with the architecture given"""
     model = tf.keras.Sequential()
     model.add(
         tf.keras.layers.Dense(
@@ -22,8 +22,11 @@ def build_model(
 def train_ml_model(
     train_x, train_y, layer_units, layer_activations, batchsize_train, seed=0
 ):
+    print("This function is deprecated!")
     tf.random.set_seed(seed)
-    model = build_model(layer_units=layer_units, layer_activations=layer_activations)
+    model = build_keras_model(
+        layer_units=layer_units, layer_activations=layer_activations
+    )
     # return model
     initial_learning_rate = 0.01
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
