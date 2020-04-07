@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from .network_utils import build_keras_model
+from ..network_utils import build_keras_model
 
 
 class MapEnsemble:
@@ -50,6 +50,16 @@ class MapEnsemble:
             predictions.append(prediction)
         return predictions
 
+    def get_weights(self):
+        networks_weights_list = []
+        for network in self.networks:
+            networks_weights_list.append(network.get_weights())
+        return networks_weights_list
+
+    def set_weights(self, networks_weights_list):
+        for network, network_weights in zip(self.networks, networks_weights_list):
+            network.set_weights(network_weights)
+
 
 class MapNetwork:
     def __init__(
@@ -86,3 +96,9 @@ class MapNetwork:
 
     def __call__(self, x_test):
         return self.predict(x_test)
+
+    def get_weights(self):
+        return self.network.get_weights()
+
+    def set_weights(self, weights_list):
+        self.network.set_weights(weights_list)

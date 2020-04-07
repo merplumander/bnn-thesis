@@ -1,7 +1,7 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from .network_utils import build_keras_model
+from ..network_utils import build_keras_model, transform_unconstrained_scale
 
 tfd = tfp.distributions
 
@@ -77,6 +77,16 @@ class MapDensityEnsemble:
             stds.append(prediction.stddev().numpy())
         return means, stds
 
+    def get_weights(self):
+        networks_weights_list = []
+        for network in self.networks:
+            networks_weights_list.append(network.get_weights())
+        return networks_weights_list
+
+    def set_weights(self, networks_weights_list):
+        for network, network_weights in zip(self.networks, networks_weights_list):
+            network.set_weights(network_weights)
+
 
 class MapDensityNetwork:
     def __init__(
@@ -99,7 +109,7 @@ class MapDensityNetwork:
         self.network.add(
             tfp.layers.DistributionLambda(
                 lambda t: tfd.Normal(
-                    loc=t[..., :1], scale=1e-6 + tf.math.softplus(0.05 * t[..., 1:])
+                    loc=t[..., :1], scale=transform_unconstrained_scale(t[..., 1:])
                 )
             )
         )
@@ -121,8 +131,13 @@ class MapDensityNetwork:
     #     return self.fit(x_train, y_train, batch_size, epochs=120)
 
     def predict(self, x_test):
-        prediction = self.network(x_test)
-        return prediction
+        return self.network(x_test)
 
     def __call__(self, x_test):
         return self.predict(x_test)
+
+    def get_weights(self):
+        return self.network.get_weights()
+
+    def set_weights(self, weights_list):
+        self.network.set_weights(weights_list)
