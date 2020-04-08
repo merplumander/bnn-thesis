@@ -21,9 +21,9 @@ def create_linear_data(
 ):
     np.random.seed(seed)
     train_x = np.random.uniform(lower, upper, (n_train, 1)).astype(dtype)
-    train_y = add_noise(ground_truth_linear_function(train_x), sigma=sigma).astype(
-        dtype
-    )
+    train_y = add_noise(
+        ground_truth_linear_function(train_x, m=m, b=b), sigma=sigma
+    ).astype(dtype)
     return train_x, train_y
 
 

@@ -41,26 +41,24 @@ def dense_layer(inputs, w, b, activation=tf.identity):
 def build_scratch_model(weights_list, layer_activation_functions):
     """
     Building a tensorflow model from scratch (i.e. without keras and tf.layers).
-    This is unfortunately needed for HMC, since sampling cannot deal with keras objects
-    for some reason.
+    This is needed for HMC, since sampling cannot deal with keras objects
+    for some reason. Probably this way it is also faster, since keras layers have a lot of additional functionality.
 
     Args:
         weights_list (list):      Flat list of weights and biases of the network
                                   (must have an even number of elements)
         layer_activations (list): List of tensorflow activation functions
+                                  (must have half as many elements as weights_list)
     """
 
-    def model(X, training=True):
+    def model(X):
         for w, b, activation in zip(
             weights_list[::2], weights_list[1::2], layer_activation_functions
         ):
             X = dense_layer(X, w, b, activation)
-        y_pred, y_unconstrained_std = tf.unstack(X, axis=-1)
-        if training:
-            return tfp.distributions.Normal(
-                loc=y_pred, scale=transform_unconstrained_scale(y_unconstrained_std)
-            )
-        return y_pred, transform_unconstrained_scale(y_unconstrained_std)
+        return tfd.Normal(
+            loc=X[..., :1], scale=transform_unconstrained_scale(X[..., 1:])
+        )
 
     return model
 
