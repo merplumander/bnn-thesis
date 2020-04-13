@@ -70,13 +70,10 @@ ensemble = MapDensityEnsemble(
 ensemble.fit(x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120)
 
 
-# %% codecell
-mean, std = ensemble.predict(x_test)
-mean = mean.numpy()
-std = std.numpy()
-
 # %%
-
+mog_prediction = ensemble.predict(x_test)  # Mixture Of Gaussian prediction
+mean = mog_prediction.mean().numpy()
+std = mog_prediction.stddev().numpy()
 fig, ax = plt.subplots(figsize=(8, 8))
 ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
 ax.plot(_x_test, mean, label=f"Mean prediction", alpha=0.8)
@@ -96,16 +93,18 @@ ax.legend()
 
 
 # %% codecell
-means, stds = ensemble.predict_mixture_of_gaussian(x_test)
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_test)
 
 fig, ax = plt.subplots(figsize=(8, 8))
-for i, (mean, std) in enumerate(zip(means, stds)):
+for i, prediction in enumerate(gaussian_predictions):
+    mean = prediction.mean()
+    std = prediction.stddev()
     c = sns.color_palette()[i]
     ax.plot(_x_test, mean, label=f"Mean prediction", c=c, alpha=0.8)
     ax.fill_between(
         _x_test.flatten(),
-        mean.flatten() - 2 * std.flatten(),
-        mean.flatten() + 2 * std.flatten(),
+        tf.reshape(mean, [mean.shape[0]]) - 2 * tf.reshape(std, [std.shape[0]]),
+        tf.reshape(mean, [mean.shape[0]]) + 2 * tf.reshape(std, [std.shape[0]]),
         color=c,
         alpha=0.2,
         label="95% HDR prediction",
@@ -120,10 +119,9 @@ ax.legend()
 
 
 # %% codecell
-mean, std = ensemble.predict(x_test)
-mean = mean.numpy()
-std = std.numpy()
-
+mog_prediction = ensemble.predict(x_test)  # Mixture Of Gaussian prediction
+mean = mog_prediction.mean().numpy()
+std = mog_prediction.stddev().numpy()
 fig, ax = plt.subplots(figsize=(8, 8))
 ax.plot(_x_test, y_test, label="Ground truth", c="k", alpha=0.1)
 c = sns.color_palette()[0]
@@ -136,11 +134,14 @@ ax.fill_between(
     alpha=0.2,
     label="95% HDR prediction",
 )
-means, stds = ensemble.predict_mixture_of_gaussian(x_test)
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_test)
 c = sns.color_palette()[1]
-for i, (mean, std) in enumerate(zip(means[:-1], stds[:-1])):
+for i, prediction in enumerate(gaussian_predictions[:-1]):
+    mean = prediction.mean()
     ax.plot(_x_test, mean, c=c, alpha=0.5)
-ax.plot(_x_test, means[-1], label=f"Function samples", c=c, alpha=0.5)
+ax.plot(
+    _x_test, gaussian_predictions[-1].mean(), label=f"Function samples", c=c, alpha=0.5
+)
 ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
 ax.set_xlabel("")
 ax.set_ylabel("")

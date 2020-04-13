@@ -49,33 +49,19 @@ class MapDensityEnsemble:
             network.fit(x_train, y_train, epochs=epochs, batch_size=batch_size)
         return self
 
-    def predict_gaussian(self, x_test):
-        means = tf.TensorArray(tf.float32, self.n_networks)
-        stds = tf.TensorArray(tf.float32, self.n_networks)
-        for i, network in enumerate(self.networks):
-            prediction = network(x_test)
-            means.write(i, prediction.mean())
-            stds.write(i, prediction.stddev())
-        means = means.stack()
-        stds = stds.stack()
-        gaussian_mean = tf.math.reduce_mean(means, axis=0)
-        gaussian_var = (
-            tf.math.reduce_mean(stds ** 2 + means ** 2, axis=0) - gaussian_mean ** 2
-        )
-        gaussian_std = tf.math.sqrt(gaussian_var)
-        return gaussian_mean, gaussian_std
+    def predict_list_of_gaussians(self, x_test):
+        predictive_distributions = []
+        for network in self.networks:
+            predictive_distributions.append(network(x_test))
+        return predictive_distributions
+
+    def predict_mixture_of_gaussians(self, x_test):
+        gaussians = self.predict_list_of_gaussians(x_test)
+        cat_probs = tf.ones(x_test.shape + (self.n_networks,)) / self.n_networks
+        return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
 
     def predict(self, x_test):
-        return self.predict_gaussian(x_test)
-
-    def predict_mixture_of_gaussian(self, x_test):
-        means = []
-        stds = []
-        for network in self.networks:
-            prediction = network(x_test)
-            means.append(prediction.mean().numpy())
-            stds.append(prediction.stddev().numpy())
-        return means, stds
+        return self.predict_mixture_of_gaussians(x_test)
 
     def get_weights(self):
         networks_weights_list = []
