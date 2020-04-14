@@ -43,10 +43,12 @@ class MapDensityEnsemble:
             for i in range(self.n_networks)
         ]
 
-    def fit(self, x_train, y_train, batch_size, epochs=200):
+    def fit(self, x_train, y_train, batch_size, epochs=200, verbose=1):
         tf.random.set_seed(self.seed)
         for network in self.networks:
-            network.fit(x_train, y_train, epochs=epochs, batch_size=batch_size)
+            network.fit(
+                x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
+            )
         return self
 
     def predict_list_of_gaussians(self, x_test):
@@ -108,9 +110,11 @@ class MapDensityNetwork:
     def negative_log_likelihood(y, p_y):
         return -p_y.log_prob(y)
 
-    def fit(self, x_train, y_train, batch_size, epochs=120):
+    def fit(self, x_train, y_train, batch_size, epochs=120, verbose=1):
         tf.random.set_seed(self.seed)
-        self.network.fit(x_train, y_train, epochs=epochs, batch_size=batch_size)
+        self.network.fit(
+            x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
+        )
         return self
 
     # def train(self, x_train, y_train, batch_size, epochs=120):

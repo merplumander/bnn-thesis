@@ -37,10 +37,12 @@ class MapEnsemble:
             for i in range(self.n_networks)
         ]
 
-    def fit(self, x_train, y_train, batch_size, epochs=120):
+    def fit(self, x_train, y_train, batch_size, epochs=120, verbose=1):
         tf.random.set_seed(self.seed)
         for network in self.networks:
-            network.fit(x_train, y_train, batch_size=batch_size, epochs=epochs)
+            network.fit(
+                x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
+            )
         return self
 
     def predict(self, x_test):
@@ -85,9 +87,19 @@ class MapNetwork:
             loss="mean_squared_error",
         )
 
-    def fit(self, x_train, y_train, batch_size, epochs=120):
+    # @tf.function
+    def fit(self, x_train, y_train, batch_size, epochs=120, verbose=1):
+        # steps_per_epoch = x_train.shape[0] // batch_size
         tf.random.set_seed(self.seed)
-        self.network.fit(x_train, y_train, epochs=epochs, batch_size=batch_size)
+        self.network.fit(
+            x_train,
+            y_train,
+            epochs=epochs,
+            batch_size=batch_size,
+            # necessary for tf function
+            # steps_per_epoch=steps_per_epoch,
+            verbose=verbose,
+        )
         return self
 
     def predict(self, x_test):

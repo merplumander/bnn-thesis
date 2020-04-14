@@ -56,7 +56,9 @@ net = MapNetwork(
 
 
 # %% codecell
-net.fit(x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120)
+net.fit(
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120, verbose=0
+)
 
 # %%
 prediction = net.predict(x_test)
