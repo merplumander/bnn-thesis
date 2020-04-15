@@ -12,6 +12,11 @@ from core.network_utils import (
     activation_strings_to_activation_functions,
     build_scratch_model,
 )
+from core.plotting_utils import (
+    plot_distribution_samples,
+    plot_predictive_distribution,
+    plot_predictive_distribution_and_function_samples,
+)
 from core.preprocessing import preprocess_create_x_train_test
 from data.toy_regression import create_linear_data, ground_truth_linear_function
 
@@ -57,26 +62,14 @@ hmc_net.fit(
 
 # %%
 mog_prediction = hmc_net.predict(x_test, thinning=3)  # Mixture Of Gaussian prediction
-
-
-# %%
-mean = mog_prediction.mean().numpy()
-std = mog_prediction.stddev().numpy()
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.plot(_x_test, mean, label=f"Mean prediction", alpha=0.8)
-ax.fill_between(
-    _x_test.flatten(),
-    mean.flatten() - 2 * std.flatten(),
-    mean.flatten() + 2 * std.flatten(),
-    alpha=0.2,
-    label="95% HDR prediction",
+plot_predictive_distribution(
+    x_test=_x_test,
+    predictive_distribution=mog_prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-3, 10],
 )
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-3, 12])
-ax.legend()
 
 
 # %% markdown
@@ -87,27 +80,15 @@ n_predictions = 3
 gaussian_predictions = hmc_net.predict_list_of_gaussians(
     x_test, n_predictions=n_predictions
 )
+plot_distribution_samples(
+    x_test=_x_test,
+    distribution_samples=gaussian_predictions,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-3, 10],
+)
 
-fig, ax = plt.subplots(figsize=(8, 8))
-for i, prediction in enumerate(gaussian_predictions):
-    mean = prediction.mean()
-    std = prediction.stddev()
-    c = sns.color_palette()[i]
-    ax.plot(_x_test, mean, label=f"Mean prediction", c=c, alpha=0.8)
-    ax.fill_between(
-        _x_test.flatten(),
-        tf.reshape(mean, [mean.shape[0]]) - 2 * tf.reshape(std, [std.shape[0]]),
-        tf.reshape(mean, [mean.shape[0]]) + 2 * tf.reshape(std, [std.shape[0]]),
-        color=c,
-        alpha=0.15,
-        label="95% HDR prediction",
-    )
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-3, 12])
-ax.legend()
 
 # %% markdown
 # Or plotting overall uncertainty and some function samples
@@ -115,35 +96,18 @@ ax.legend()
 # %%
 n_predictions = 5
 mog_prediction = hmc_net.predict(x_test)  # Mixture Of Gaussian prediction
-mean = mog_prediction.mean().numpy()
-std = mog_prediction.stddev().numpy()
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", c="k", alpha=0.1)
-c = sns.color_palette()[0]
-ax.plot(_x_test, mean, label=f"Mean prediction", c=c, alpha=1)
-ax.fill_between(
-    _x_test.flatten(),
-    mean.flatten() - 2 * std.flatten(),
-    mean.flatten() + 2 * std.flatten(),
-    color=c,
-    alpha=0.2,
-    label="95% HDR prediction",
-)
 gaussian_predictions = hmc_net.predict_list_of_gaussians(
     x_test, n_predictions=n_predictions
 )
-c = sns.color_palette()[1]
-for i, prediction in enumerate(gaussian_predictions[:-1]):
-    mean = prediction.mean()
-    ax.plot(_x_test, mean, c=c, alpha=0.5)
-ax.plot(
-    _x_test, gaussian_predictions[-1].mean(), label=f"Function samples", c=c, alpha=0.5
+plot_predictive_distribution_and_function_samples(
+    x_test=_x_test,
+    predictive_distribution=mog_prediction,
+    distribution_samples=gaussian_predictions,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-3, 10],
 )
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-3, 12])
-ax.legend()
 
 
 # %%
@@ -172,23 +136,14 @@ map_net.fit(x_train=x_train, y_train=y_train, batch_size=20, epochs=200, verbose
 
 # %%
 prediction = map_net.predict(x_test)
-mean = prediction.mean().numpy()
-std = prediction.stddev().numpy()
-
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.plot(_x_test, mean, label=f"Mean prediction", alpha=0.8)
-ax.fill_between(
-    _x_test.flatten(),
-    mean.flatten() - 2 * std.flatten(),
-    mean.flatten() + 2 * std.flatten(),
-    alpha=0.2,
-    label="95% HDR prediction",
+plot_predictive_distribution(
+    x_test=_x_test,
+    predictive_distribution=prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-3, 10],
 )
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.legend()
 
 # %%
 initial_state = map_net.get_weights()
@@ -209,23 +164,11 @@ hmc_net.fit(
 
 # %%
 mog_prediction = hmc_net.predict(x_test, thinning=2)  # Mixture Of Gaussian prediction
-
-
-# %%
-mean = mog_prediction.mean().numpy()
-std = mog_prediction.stddev().numpy()
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.plot(_x_test, mean, label=f"Mean prediction", alpha=0.8)
-ax.fill_between(
-    _x_test.flatten(),
-    mean.flatten() - 2 * std.flatten(),
-    mean.flatten() + 2 * std.flatten(),
-    alpha=0.2,
-    label="95% HDR prediction",
+plot_predictive_distribution(
+    x_test=_x_test,
+    predictive_distribution=mog_prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-3, 10],
 )
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-3, 12])
-ax.legend()

@@ -6,6 +6,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from core.map import MapDensityNetwork
+from core.plotting_utils import plot_predictive_distribution
 from core.preprocessing import preprocess_create_x_train_test
 from data.toy_regression import (
     create_split_periodic_data_heteroscedastic,
@@ -55,25 +56,17 @@ net = MapDensityNetwork(
 
 
 # %% codecell
-net.fit(x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120)
+net.fit(
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120, verbose=0
+)
 
 # %%
 prediction = net.predict(x_test)
-mean = prediction.mean().numpy()
-std = prediction.stddev().numpy()
-
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.plot(_x_test, mean, label=f"Mean prediction", alpha=0.8)
-ax.fill_between(
-    _x_test.flatten(),
-    mean.flatten() - 2 * std.flatten(),
-    mean.flatten() + 2 * std.flatten(),
-    alpha=0.2,
-    label="95% HDR prediction",
+plot_predictive_distribution(
+    x_test=_x_test,
+    predictive_distribution=prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_test=y_test,
+    y_lim=[-6, 6],
 )
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-5, 5])
-ax.legend()
