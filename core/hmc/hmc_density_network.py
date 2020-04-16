@@ -26,6 +26,8 @@ class HMCDensityNetwork:
         self.layer_activations = layer_activations
         self.seed = seed
 
+        self.initial_state = None
+
         self.burnin = None
         self.samples = None
         self.trace = None
@@ -52,7 +54,8 @@ class HMCDensityNetwork:
             epochs=epochs,
             verbose=verbose,
         )
-        return net.get_weights()
+        self.initial_state = net.get_weights()
+        return self.initial_state
 
     def _target_log_prob_fn_factory(self, x_train, y_train):
         def target_log_prob_fn(*current_state):
@@ -84,22 +87,22 @@ class HMCDensityNetwork:
         self,
         x_train,
         y_train,
+        initial_state=None,
         step_size_adapter="dual_averaging",
         sampler="hmc",
         num_burnin_steps=1000,
         num_results=5000,
         num_leapfrog_steps=5,
         step_size=0.1,
-        current_state=None,
         resume=False,
-        learning_rate=0.1,
+        learning_rate=0.01,
         batch_size=20,
         epochs=100,
         verbose=1,
     ):
 
-        if current_state is None and not resume:
-            current_state = self._initial_state_through_map_estimation(
+        if self.initial_state is None and initial_state is None:
+            initial_state = self._initial_state_through_map_estimation(
                 x_train,
                 y_train,
                 learning_rate=learning_rate,
@@ -107,6 +110,8 @@ class HMCDensityNetwork:
                 epochs=epochs,
                 verbose=verbose,
             )
+
+        current_state = initial_state
 
         target_log_prob_fn = self._target_log_prob_fn_factory(x_train, y_train)
 
@@ -187,8 +192,16 @@ class HMCDensityNetwork:
         if n_predictions is None:
             loop_over = tf.range(0, n_samples, thinning)
         else:
-            interval = int(n_samples / n_predictions)
-            loop_over = tf.range(0, n_samples, interval) + interval - 1
+            loop_over = tf.cast(
+                tf.math.ceil(
+                    tf.linspace(
+                        0, tf.constant(n_samples - 1, dtype=tf.float32), n_predictions,
+                    )
+                ),
+                tf.int32,
+            )
+            # interval = int(n_samples / n_predictions)
+            # loop_over = tf.range(0, n_samples, interval) + interval - 1
         # A network parameterized by a sample from the chain produces a (aleatoric)
         # predictive normal distribution for the x_test. They are all accumulated in
         # this list
@@ -207,6 +220,26 @@ class HMCDensityNetwork:
 
     def predict(self, x_test, thinning=1):
         return self.predict_mixture_of_gaussians(x_test=x_test, thinning=thinning)
+
+    # very useful for debugging
+    def predict_by_sample_indices(self, x_test, burnin=False, indices=[0]):
+        predictive_distributions = []
+        for i_sample in indices:
+            weights_list = [param[i_sample] for param in self.samples]
+            model = build_scratch_model(weights_list, self.layer_activation_functions)
+            prediction = model(x_test)
+            predictive_distributions.append(prediction)
+        return predictive_distributions
+
+    # very useful for debugging
+    def predict_from_sample_parameters(self, x_test, sample_parameters):
+        """
+        sample_parameters is a list of tensors or arrays specifying the network
+        parameters.
+        """
+        model = build_scratch_model(sample_parameters, self.layer_activation_functions)
+        prediction = model(x_test)
+        return prediction
 
     # # this probably makes no sense
     # def predict_aleatoric_only(self, x_test):
