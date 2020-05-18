@@ -31,7 +31,7 @@ class MapEnsemble:
                 self.input_shape,
                 self.layer_units,
                 self.layer_activations,
-                self.learning_rate,
+                learning_rate=self.learning_rate,
                 seed=self.seed + i,
             )
             for i in range(self.n_networks)
@@ -69,17 +69,19 @@ class MapNetwork:
         input_shape=[1],
         layer_units=[200, 100, 1],
         layer_activations=["relu", "relu", "linear"],
+        names=None,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
         seed=0,
     ):
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.names = names
         self.learning_rate = learning_rate
         self.seed = seed
         tf.random.set_seed(self.seed)
         self.network = build_keras_model(
-            self.input_shape, self.layer_units, self.layer_activations
+            self.input_shape, self.layer_units, self.layer_activations, names=self.names
         )
 
         self.network.compile(

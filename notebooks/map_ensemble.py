@@ -63,7 +63,7 @@ ensemble = MapEnsemble(
 
 
 # %% codecell
-ensemble.fit(x_train=x_train, y_train=y_train, batch_size=batchsize_train)
+ensemble.fit(x_train=x_train, y_train=y_train, batch_size=batchsize_train, verbose=0)
 
 
 # %% codecell
