@@ -32,12 +32,14 @@ figure_dir = "./figures"
 
 # %% codecell
 np.random.seed(0)
-n_networks = 5
+n_networks = 10
 n_train = 20
 batchsize_train = 20
 
 # train and test variables beginning with an underscore are unprocessed.
-_x_train, y_train = create_split_periodic_data_heteroscedastic(n_train=n_train, seed=42)
+_x_train, y_train = create_split_periodic_data_heteroscedastic(
+    n_train=n_train, sigma1=2, sigma2=2, seed=42
+)
 x_train, _x_test, x_test = preprocess_create_x_train_test(_x_train)
 y_test = ground_truth_periodic_function(_x_test)
 
@@ -73,11 +75,12 @@ ensemble = MapDensityEnsemble(
 
 # %% codecell
 ensemble.fit(
-    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120, verbose=0
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=150, verbose=0
 )
 
 
 # %%
+y_lim = [-10, 8]
 mog_prediction = ensemble.predict(x_test)  # Mixture Of Gaussian prediction
 plot_predictive_distribution(
     x_test=_x_test,
@@ -85,25 +88,25 @@ plot_predictive_distribution(
     x_train=_x_train,
     y_train=y_train,
     y_test=y_test,
-    y_lim=[-5, 7],
+    y_lim=y_lim,
 )
-# fig.savefig(os.path.join(figure_dir, f"{n_networks}_ml_density_ensemble_gaussian_heteroscedastic.pdf"))
 
 
 # %% codecell
-gaussian_predictions = ensemble.predict_list_of_gaussians(x_test)
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_test, n_predictions=3)
 plot_distribution_samples(
     x_test=_x_test,
     distribution_samples=gaussian_predictions,
     x_train=_x_train,
     y_train=y_train,
     y_test=y_test,
-    y_lim=[-5, 7],
+    y_lim=y_lim,
 )
 # fig.savefig(os.path.join(figure_dir, f"{n_networks}_ml_density_ensemble_mixture_of_gaussian_heteroscedastic.pdf"))
 
 
 # %% codecell
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_test, n_predictions=5)
 plot_predictive_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
@@ -111,6 +114,6 @@ plot_predictive_distribution_and_function_samples(
     x_train=_x_train,
     y_train=y_train,
     y_test=y_test,
-    y_lim=[-5, 7],
+    y_lim=y_lim,
 )
 # fig.savefig(os.path.join(figure_dir, f"{n_networks}_ml_density_ensemble_gaussian_samples_heteroscedastic.pdf"))

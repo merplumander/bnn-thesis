@@ -24,6 +24,8 @@ def activation_strings_to_activation_functions(layer_activations):
     for activation_str in layer_activations:
         if activation_str == "relu":
             activation_function = tf.nn.relu
+        elif activation_str == "tanh":
+            activation_function = tf.nn.tanh
         elif activation_str == "linear":
             activation_function = tf.identity
         else:
@@ -67,17 +69,57 @@ def build_keras_model(
     input_shape=[1],
     layer_units=[200, 100, 1],
     layer_activations=["relu", "relu", "linear"],
+    kernel_regularizers=None,
+    bias_regularizers=None,
+    names=None,
 ):
     """Building an uncompiled keras tensorflow model with the architecture given"""
+    if names is None:
+        names = [None] * len(layer_units)
+    if kernel_regularizers is None:
+        kernel_regularizers = [None] * len(layer_units)
+    if bias_regularizers is None:
+        bias_regularizers = [None] * len(layer_units)
     model = tf.keras.Sequential()
     model.add(
         tf.keras.layers.Dense(
-            layer_units[0], activation=layer_activations[0], input_shape=input_shape
+            layer_units[0],
+            input_shape=input_shape,
+            activation=layer_activations[0],
+            name=names[0],
+            kernel_regularizer=kernel_regularizers[0],
+            bias_regularizer=bias_regularizers[0],
         )
     )
-    for units, activation in zip(layer_units[1:], layer_activations[1:]):
-        model.add(tf.keras.layers.Dense(units, activation=activation))
+    for units, activation, name, kernel_regularizer, bias_regularizer in zip(
+        layer_units[1:],
+        layer_activations[1:],
+        names[1:],
+        kernel_regularizers[1:],
+        bias_regularizers[1:],
+    ):
+        model.add(
+            tf.keras.layers.Dense(
+                units,
+                activation=activation,
+                name=name,
+                kernel_regularizer=kernel_regularizer,
+                bias_regularizer=bias_regularizer,
+            )
+        )
     return model
+
+
+@tf.keras.utils.register_keras_serializable(package="Custom", name="l2")
+class PriorRegularizer(tf.keras.regularizers.Regularizer):
+    def __init__(self, prior_distribution):
+        self.prior_distribution = prior_distribution
+
+    def __call__(self, weight_matrix):
+        return tf.math.reduce_sum(self.prior_distribution.log_prob(weight_matrix))
+
+    def get_config(self):
+        return {"prior_distribution": self.prior_distribution}
 
 
 def train_ml_model(
