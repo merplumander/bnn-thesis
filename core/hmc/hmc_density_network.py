@@ -1,5 +1,8 @@
 # with lots of inspiration from https://janosh.io/blog/hmc-bnn
 
+import pickle
+from pathlib import Path
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -317,6 +320,16 @@ class HMCDensityNetwork:
             prediction = self.predict_from_sample_parameters(x_test, prior_sample)
             predictive_distributions.append(prediction)
         return predictive_distributions
+
+    def save(self, save_path):
+        with open(save_path, "wb") as f:
+            pickle.dump(self, f, -1)
+
+
+def hmc_density_network_from_save_path(save_path):
+    with open(save_path, "rb") as f:
+        hmc_net = pickle.load(f)
+    return hmc_net
 
 
 def nest_concat(*args, axis=0):

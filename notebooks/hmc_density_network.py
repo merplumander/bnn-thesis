@@ -1,12 +1,14 @@
 # %load_ext autoreload
 # %autoreload 2
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from core.hmc import HMCDensityNetwork
+from core.hmc import HMCDensityNetwork, hmc_density_network_from_save_path
 from core.map import MapDensityNetwork
 from core.network_utils import (
     activation_strings_to_activation_functions,
@@ -25,8 +27,18 @@ from data.toy_regression import (
 
 tfd = tfp.distributions
 
+save_dir = ".save_data/"
+save_dir = Path(save_dir)
+save_dir.mkdir(parents=True, exist_ok=True)
 
-# %% codecell
+figure_dir = "figures"
+figure_dir = Path(figure_dir)
+figure_dir.mkdir(parents=True, exist_ok=True)
+
+# %%
+unique_save_path = "hmc_density_example"
+unique_save_path = save_dir.joinpath(unique_save_path)
+
 n_train = 20
 _x_train, y_train = create_split_periodic_data_heteroscedastic(
     n_train=n_train, sigma1=2, sigma2=2, seed=42
@@ -39,7 +51,7 @@ y_test = ground_truth_periodic_function(_x_test)
 input_shape = [1]
 layer_units = [20, 10, 2]  # [50, 30, 20, 10, 2]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
-weight_priors = [tfd.Normal(0, 0.8)] * len(layer_units)
+weight_priors = [tfd.Normal(0, 3)] * len(layer_units)
 bias_priors = weight_priors
 
 
@@ -48,34 +60,44 @@ bias_priors = weight_priors
 
 
 # %%
-sampler = "hmc"
-num_burnin_steps = 1000
-num_results = 5000
+rerun_training = True
+if rerun_training:
+    unique_save_path.unlink()
+
+# %%
+sampler = "nuts"
+num_burnin_steps = 10
+num_results = 500
 num_leapfrog_steps = 15
 step_size = 0.1
 
-hmc_net = HMCDensityNetwork(
-    input_shape,
-    layer_units,
-    layer_activations,
-    weight_priors=weight_priors,
-    bias_priors=bias_priors,
-    seed=0,
-)
+if unique_save_path.is_file():
+    hmc_net = hmc_density_network_from_save_path(unique_save_path)
+else:
+    hmc_net = HMCDensityNetwork(
+        input_shape,
+        layer_units,
+        layer_activations,
+        weight_priors=weight_priors,
+        bias_priors=bias_priors,
+        seed=0,
+    )
 
-hmc_net.fit(
-    x_train,
-    y_train,
-    sampler=sampler,
-    num_burnin_steps=num_burnin_steps,
-    num_results=num_results,
-    num_leapfrog_steps=num_leapfrog_steps,
-    step_size=step_size,
-    learning_rate=0.01,
-    batch_size=20,
-    epochs=500,
-    verbose=0,
-)
+    hmc_net.fit(
+        x_train,
+        y_train,
+        sampler=sampler,
+        num_burnin_steps=num_burnin_steps,
+        num_results=num_results,
+        num_leapfrog_steps=num_leapfrog_steps,
+        step_size=step_size,
+        learning_rate=0.01,
+        batch_size=20,
+        epochs=500,
+        verbose=0,
+    )
+
+    hmc_net.save(unique_save_path)
 
 # %% markdown
 # Standard prediction returns an equally weighted mixture of Gaussians. One Gaussian for each parameter setting in the chain.
