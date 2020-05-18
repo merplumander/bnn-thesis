@@ -16,3 +16,5 @@ zhusuan
 thermo
 figures
 logs
+notebooks/experimental
+test.py
