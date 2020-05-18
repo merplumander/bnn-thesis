@@ -22,7 +22,7 @@ def create_linear_data(
     np.random.seed(seed)
     train_x = np.random.uniform(lower, upper, (n_train, 1)).astype(dtype)
     train_y = add_noise(
-        ground_truth_linear_function(train_x, m=m, b=b), sigma=sigma
+        ground_truth_linear_function(train_x, m=m, b=b), sigma=sigma, seed=seed
     ).astype(dtype)
     return train_x, train_y
 
@@ -51,9 +51,9 @@ def create_split_periodic_data(
         .reshape(-1, 1)
         .astype(dtype)
     )
-    train_y = add_noise(ground_truth_periodic_function(train_x), sigma=sigma).astype(
-        dtype
-    )
+    train_y = add_noise(
+        ground_truth_periodic_function(train_x), sigma=sigma, seed=seed
+    ).astype(dtype)
     return train_x, train_y
 
 
@@ -75,7 +75,11 @@ def create_split_periodic_data_heteroscedastic(
     train_x_l = np.random.uniform(lower1, upper1, n_train_half)
     train_x_r = np.random.uniform(lower2, upper2, n_train_half)
     train_x = np.concatenate((train_x_l, train_x_r)).reshape(-1, 1).astype(dtype)
-    train_y_l = add_noise(ground_truth_periodic_function(train_x_l), sigma=sigma1)
-    train_y_r = add_noise(ground_truth_periodic_function(train_x_r), sigma=sigma2)
-    train_y = np.concatenate((train_y_l, train_y_r)).astype(dtype)
+    train_y_l = add_noise(
+        ground_truth_periodic_function(train_x_l), sigma=sigma1, seed=seed
+    )
+    train_y_r = add_noise(
+        ground_truth_periodic_function(train_x_r), sigma=sigma2, seed=seed
+    )
+    train_y = np.concatenate((train_y_l, train_y_r)).reshape(-1, 1).astype(dtype)
     return train_x, train_y
