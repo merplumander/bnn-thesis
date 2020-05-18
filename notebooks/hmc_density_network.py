@@ -18,50 +18,71 @@ from core.plotting_utils import (
     plot_predictive_distribution_and_function_samples,
 )
 from core.preprocessing import preprocess_create_x_train_test
-from data.toy_regression import create_linear_data, ground_truth_linear_function
+from data.toy_regression import (
+    create_split_periodic_data_heteroscedastic,
+    ground_truth_periodic_function,
+)
 
 tfd = tfp.distributions
 
 
 # %% codecell
 n_train = 20
-m = 1
-b = 3
-_x_train, y_train = create_linear_data(n_train, m=m, b=b, sigma=0.5)
+_x_train, y_train = create_split_periodic_data_heteroscedastic(
+    n_train=n_train, sigma1=2, sigma2=2, seed=42
+)
 x_train, _x_test, x_test = preprocess_create_x_train_test(_x_train)
-y_test = ground_truth_linear_function(_x_test, m=m, b=b)
+y_test = ground_truth_periodic_function(_x_test)
 
 
 # %% codecell
 input_shape = [1]
-layer_units = [20, 10, 2]
-layer_activations = ["relu", "relu", "linear"]
-num_burnin_steps = 1000
-num_results = 3000
+layer_units = [20, 10, 2]  # [50, 30, 20, 10, 2]
+layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
+weight_priors = [tfd.Normal(0, 0.8)] * len(layer_units)
+bias_priors = weight_priors
+
 
 # %% markdown
 #### HMCDensityNetwork follows the fit and predict scheme:
 
 
 # %%
-hmc_net = HMCDensityNetwork(input_shape, layer_units, layer_activations, seed=0)
+sampler = "hmc"
+num_burnin_steps = 1000
+num_results = 5000
+num_leapfrog_steps = 15
+step_size = 0.1
 
-# %%
+hmc_net = HMCDensityNetwork(
+    input_shape,
+    layer_units,
+    layer_activations,
+    weight_priors=weight_priors,
+    bias_priors=bias_priors,
+    seed=0,
+)
+
 hmc_net.fit(
     x_train,
     y_train,
+    sampler=sampler,
     num_burnin_steps=num_burnin_steps,
     num_results=num_results,
+    num_leapfrog_steps=num_leapfrog_steps,
+    step_size=step_size,
+    learning_rate=0.01,
+    batch_size=20,
+    epochs=500,
     verbose=0,
 )
-
 
 # %% markdown
 # Standard prediction returns an equally weighted mixture of Gaussians. One Gaussian for each parameter setting in the chain.
 # The Gaussians represent aleatoric uncertainty, while mixing these Gaussians as per the samples from the markov chain represents epistemic uncertainty.
 
 # %%
-mog_prediction = hmc_net.predict(x_test, thinning=3)  # Mixture Of Gaussian prediction
+mog_prediction = hmc_net.predict(x_test, thinning=10)  # Mixture Of Gaussian prediction
 plot_predictive_distribution(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
@@ -151,11 +172,18 @@ initial_state = map_net.get_weights()
 
 
 # %%
-hmc_net = HMCDensityNetwork(input_shape, layer_units, layer_activations, seed=0)
+hmc_net = HMCDensityNetwork(
+    input_shape,
+    layer_units,
+    layer_activations,
+    weight_priors=weight_priors,
+    bias_priors=bias_priors,
+    seed=0,
+)
 hmc_net.fit(
     x_train,
     y_train,
-    current_state=initial_state,
+    initial_state=initial_state,
     num_burnin_steps=1000,
     num_results=2000,
     verbose=0,

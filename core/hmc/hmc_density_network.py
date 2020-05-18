@@ -18,12 +18,28 @@ class HMCDensityNetwork:
         input_shape=[1],
         layer_units=[200, 100, 2],
         layer_activations=["relu", "relu", "linear"],
+        weight_priors=[tfd.Normal(0, 0.2)] * 3,
+        bias_priors=[tfd.Normal(0, 0.2)] * 3,
         seed=0,
     ):
+        """
+        A neural network whose posterior distribution parameters is estimated by HMC.
+        Each individual network sample explicitly models varying aleatoric uncertainty.
 
+        Params:
+            weight_priors (list of tfp distributions):
+                Must have same length as layer_units. Each distribution must be scalar
+                is applied to the respective layer weights.
+                In some future version, it might be possible to pass a distribution
+                with the right shape.
+            bias_priors (list of tfp distributions):
+                Same as weight_prior but for biases.
+        """
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.weight_priors = weight_priors
+        self.bias_priors = bias_priors
         self.seed = seed
 
         self.initial_state = None
@@ -57,12 +73,51 @@ class HMCDensityNetwork:
         self.initial_state = net.get_weights()
         return self.initial_state
 
-    def _target_log_prob_fn_factory(self, x_train, y_train):
-        def target_log_prob_fn(*current_state):
-            model = build_scratch_model(current_state, self.layer_activation_functions)
-            return tf.reduce_sum(model(x_train).log_prob(y_train))
+    def log_prior(self, current_state):
+        log_prob = 0
+        for w, b, w_prior, b_prior in zip(
+            current_state[::2],
+            current_state[1::2],
+            self.weight_priors,
+            self.bias_priors,
+        ):
+            log_prob += tf.reduce_sum(w_prior.log_prob(w))
+            log_prob += tf.reduce_sum(b_prior.log_prob(b))
+        return log_prob
 
-        return target_log_prob_fn
+    def log_likelihood(self, current_state, x, y):
+        model = build_scratch_model(current_state, self.layer_activation_functions)
+        return tf.reduce_sum(model(x).log_prob(y))
+
+    def _target_log_prob_fn_factory(self, x, y):
+        def log_posterior(*current_state):
+            log_prob = self.log_prior(current_state)
+            log_prob += self.log_likelihood(current_state, x, y)
+            return log_prob
+            # model = build_scratch_model(current_state, self.layer_activation_functions)
+            # return tf.reduce_sum(model(x_train).log_prob(y_train))
+
+        return log_posterior
+
+    def sample_prior_state(self, overdisp=1.0, seed=0):
+        """Draw random samples for weights and biases of a NN according to some
+        specified prior distributions. This set of parameter values can serve as a
+        starting point for MCMC or gradient descent training.
+        """
+        tf.random.set_seed(seed)
+        init_state = []
+        for n1, n2, w_prior, b_prior in zip(
+            self.input_shape + self.layer_units,
+            self.layer_units,
+            self.weight_priors,
+            self.bias_priors,
+        ):
+            w_shape, b_shape = [n1, n2], n2
+            # Use overdispersion > 1 for better R-hat statistics.
+            w = w_prior.sample(w_shape) * overdisp
+            b = b_prior.sample(b_shape) * overdisp
+            init_state.extend([tf.Variable(w), tf.Variable(b)])
+        return init_state
 
     @tf.function
     def _sample_chain(
@@ -177,6 +232,12 @@ class HMCDensityNetwork:
         self.final_kernel_results = final_kernel_results
         return self
 
+    def ess(self, **kwargs):
+        """
+        Estimate effective sample size of Markov chain(s).
+        """
+        return tfp.mcmc.effective_sample_size(self.samples, **kwargs)
+
     def predict_list_of_gaussians(self, x_test, thinning=1, n_predictions=None):
         """
         Produces a list of aleatoric Gaussian predictions from the sampled parameters
@@ -213,16 +274,16 @@ class HMCDensityNetwork:
             predictive_distributions.append(prediction)
         return predictive_distributions
 
-    def predict_mixture_of_gaussians(self, x_test, thinning=1):
-        gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
-        cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
+    def predict_mixture_of_gaussians(self, cat_probs, gaussians):
         return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
 
     def predict(self, x_test, thinning=1):
-        return self.predict_mixture_of_gaussians(x_test=x_test, thinning=thinning)
+        gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
+        cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
+        return self.predict_mixture_of_gaussians(cat_probs, gaussians)
 
     # very useful for debugging
-    def predict_by_sample_indices(self, x_test, burnin=False, indices=[0]):
+    def predict_list_from_sample_indices(self, x_test, burnin=False, indices=[0]):
         predictive_distributions = []
         for i_sample in indices:
             weights_list = [param[i_sample] for param in self.samples]
@@ -241,11 +302,21 @@ class HMCDensityNetwork:
         prediction = model(x_test)
         return prediction
 
-    # # this probably makes no sense
-    # def predict_aleatoric_only(self, x_test):
-    #     post_point_params = [tf.reduce_mean(t, axis=0) for t in self.samples]
-    #     post_point_model = build_scratch_model(post_point_params, self.layer_activation_functions)
-    #     return post_point_model(x_test)
+    # very useful for debugging
+    def predict_mixture_from_sample_indices(self, x_test, burnin=False, indices=[0]):
+        gaussians = self.predict_list_from_sample_indices(
+            x_test, burnin=burnin, indices=indices
+        )
+        cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
+        return self.predict_mixture_of_gaussians(cat_probs, gaussians)
+
+    def predict_with_prior_samples(self, x_test, n_samples=5, seed=0):
+        predictive_distributions = []
+        for sample in range(n_samples):
+            prior_sample = self.sample_prior_state(seed=seed + sample * 0.01)
+            prediction = self.predict_from_sample_parameters(x_test, prior_sample)
+            predictive_distributions.append(prediction)
+        return predictive_distributions
 
 
 def nest_concat(*args, axis=0):
