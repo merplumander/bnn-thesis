@@ -61,8 +61,7 @@ bias_priors = weight_priors
 
 # %%
 rerun_training = True
-if rerun_training:
-    unique_save_path.unlink()
+
 
 # %%
 sampler = "nuts"
@@ -71,9 +70,7 @@ num_results = 500
 num_leapfrog_steps = 15
 step_size = 0.1
 
-if unique_save_path.is_file():
-    hmc_net = hmc_density_network_from_save_path(unique_save_path)
-else:
+if rerun_training:
     hmc_net = HMCDensityNetwork(
         input_shape,
         layer_units,
@@ -98,6 +95,8 @@ else:
     )
 
     hmc_net.save(unique_save_path)
+else:
+    hmc_net = hmc_density_network_from_save_path(unique_save_path)
 
 # %% markdown
 # Standard prediction returns an equally weighted mixture of Gaussians. One Gaussian for each parameter setting in the chain.
