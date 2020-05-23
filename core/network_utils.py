@@ -1,8 +1,28 @@
+from collections.abc import Iterable
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
 tfd = tfp.distributions
+
+
+def regularization_lambda_to_prior_scale(regularization_lambda):
+    """
+    Takes the regularization parameter lambda of L2 regularization and outputs the scale
+    of the corresponding normal distribution.
+    """
+    scale = np.sqrt(1 / (2 * regularization_lambda))
+    return scale
+
+
+def prior_scale_to_regularization_lambda(prior_scale):
+    """
+    Takes the scale of the prior normal distribution and outputs the corresponding L2
+    regularization lambda.
+    """
+    regularization_lambda = 1 / (2 * prior_scale ** 2)
+    return regularization_lambda
 
 
 def transform_unconstrained_scale(unconstrained_scale, stability_addition=1e-6):
@@ -69,17 +89,28 @@ def build_keras_model(
     input_shape=[1],
     layer_units=[200, 100, 1],
     layer_activations=["relu", "relu", "linear"],
-    kernel_regularizers=None,
-    bias_regularizers=None,
+    l2_weight_lambda=None,
+    l2_bias_lambda=None,
     names=None,
 ):
     """Building an uncompiled keras tensorflow model with the architecture given"""
     if names is None:
         names = [None] * len(layer_units)
-    if kernel_regularizers is None:
-        kernel_regularizers = [None] * len(layer_units)
-    if bias_regularizers is None:
-        bias_regularizers = [None] * len(layer_units)
+    if not isinstance(l2_weight_lambda, Iterable):
+        if l2_weight_lambda is None:
+            kernel_regularizers = [None] * len(layer_units)
+        else:
+            kernel_regularizers = [tf.keras.regularizers.l2(l2_weight_lambda)] * len(
+                layer_units
+            )
+    if not isinstance(l2_bias_lambda, Iterable):
+        if l2_bias_lambda is None:
+            bias_regularizers = [None] * len(layer_units)
+        else:
+            bias_regularizers = [tf.keras.regularizers.l2(l2_bias_lambda)] * len(
+                layer_units
+            )
+
     model = tf.keras.Sequential()
     model.add(
         tf.keras.layers.Dense(
@@ -110,16 +141,16 @@ def build_keras_model(
     return model
 
 
-@tf.keras.utils.register_keras_serializable(package="Custom", name="l2")
-class PriorRegularizer(tf.keras.regularizers.Regularizer):
-    def __init__(self, prior_distribution):
-        self.prior_distribution = prior_distribution
-
-    def __call__(self, weight_matrix):
-        return tf.math.reduce_sum(self.prior_distribution.log_prob(weight_matrix))
-
-    def get_config(self):
-        return {"prior_distribution": self.prior_distribution}
+# @tf.keras.utils.register_keras_serializable(package="Custom", name="l2")
+# class PriorRegularizer(tf.keras.regularizers.Regularizer):
+#     def __init__(self, prior_distribution):
+#         self.prior_distribution = prior_distribution
+#
+#     def __call__(self, weight_matrix):
+#         return tf.math.reduce_sum(self.prior_distribution.log_prob(weight_matrix))
+#
+#     def get_config(self):
+#         return {"prior_distribution": self.prior_distribution}
 
 
 def train_ml_model(

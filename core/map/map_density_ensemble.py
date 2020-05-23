@@ -4,8 +4,8 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from ..network_utils import (
-    PriorRegularizer,
     build_keras_model,
+    regularization_lambda_to_prior_scale,
     transform_unconstrained_scale,
 )
 
@@ -18,6 +18,8 @@ class MapDensityEnsemble:
         n_networks=5,
         input_shape=[1],
         layer_units=[200, 100, 2],
+        l2_weight_lambda=None,
+        l2_bias_lambda=None,
         layer_activations=["relu", "relu", "linear"],
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
         seed=0,
@@ -35,18 +37,28 @@ class MapDensityEnsemble:
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.l2_weight_lambda = l2_weight_lambda
+        self.l2_bias_lambda = l2_bias_lambda
         self.learning_rate = learning_rate
         self.seed = seed
+        if not isinstance(self.l2_weight_lambda, Iterable):
+            self.l2_weight_lambda = [self.l2_weight_lambda] * self.n_networks
+        if not isinstance(self.l2_bias_lambda, Iterable):
+            self.l2_bias_lambda = [self.l2_bias_lambda] * self.n_networks
         tf.random.set_seed(self.seed)
         self.networks = [
             MapDensityNetwork(
                 self.input_shape,
                 self.layer_units,
                 self.layer_activations,
+                l2_weight_lambda=l2_weight_lambda,
+                l2_bias_lambda=l2_bias_lambda,
                 learning_rate=self.learning_rate,
                 seed=self.seed + i,
             )
-            for i in range(self.n_networks)
+            for i, l2_weight_lambda, l2_bias_lambda in zip(
+                range(self.n_networks), self.l2_weight_lambda, self.l2_bias_lambda
+            )
         ]
 
     def fit(self, x_train, y_train, batch_size, epochs=200, verbose=1):
@@ -105,36 +117,26 @@ class MapDensityNetwork:
         input_shape=[1],
         layer_units=[200, 100, 2],
         layer_activations=["relu", "relu", "linear"],
-        weight_priors=None,
-        bias_priors=None,
+        l2_weight_lambda=None,  # float or list of floats
+        l2_bias_lambda=None,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
         seed=0,
     ):
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
-        self.weight_priors = weight_priors
-        self.bias_priors = bias_priors
+        self.l2_weight_lambda = l2_weight_lambda
+        self.l2_bias_lambda = l2_bias_lambda
         self.learning_rate = learning_rate
         self.seed = seed
         tf.random.set_seed(self.seed)
-        # There is a problem with this PriorRegularizer
-        if weight_priors is not None:
-            weight_regularizers = [
-                PriorRegularizer(w_prior) for w_prior in weight_priors
-            ]
-        else:
-            weight_regularizers = None
-        if bias_priors is not None:
-            bias_regularizers = [PriorRegularizer(b_prior) for b_prior in bias_priors]
-        else:
-            bias_regularizers = None
+
         self.network = build_keras_model(
             self.input_shape,
             self.layer_units,
             self.layer_activations,
-            kernel_regularizers=weight_regularizers,
-            bias_regularizers=bias_regularizers,
+            l2_weight_lambda=self.l2_weight_lambda,
+            l2_bias_lambda=self.l2_bias_lambda,
         )
         self.network.add(
             tfp.layers.DistributionLambda(
@@ -152,8 +154,9 @@ class MapDensityNetwork:
     def negative_log_prior(self):
         params = self.get_weights()
         log_prob = 0
+        weight_priors, bias_priors = self._get_priors()
         for w, b, w_prior, b_prior in zip(
-            params[::2], params[1::2], self.weight_priors, self.bias_priors
+            params[::2], params[1::2], weight_priors, bias_priors
         ):
             log_prob += tf.reduce_sum(w_prior.log_prob(w))
             log_prob += tf.reduce_sum(b_prior.log_prob(b))
@@ -167,10 +170,33 @@ class MapDensityNetwork:
         log_likelihood = MapDensityNetwork.log_likelihood(y, p_y)
         return log_likelihood  # + log_prior
 
+    def _get_priors(self):
+        assert self.l2_weight_lambda is not None and self.l2_bias_lambda is not None
+        l2_weight_lambda = self.l2_weight_lambda
+        l2_bias_lambda = self.l2_bias_lambda
+        if not isinstance(l2_weight_lambda, Iterable):
+            l2_weight_lambda = [l2_weight_lambda] * len(self.layer_units)
+        if not isinstance(l2_bias_lambda, Iterable):
+            l2_bias_lambda = [l2_bias_lambda] * len(self.layer_units)
+        w_priors = []
+        b_priors = []
+        for w_lambda, b_lambda, u1, u2 in zip(
+            l2_weight_lambda,
+            l2_bias_lambda,
+            self.input_shape + self.layer_units[:-1],
+            self.layer_units,
+        ):
+            w_scale = regularization_lambda_to_prior_scale(w_lambda)
+            b_scale = regularization_lambda_to_prior_scale(b_lambda)
+            w_priors.append(tfd.Normal(0, tf.ones((u1, u2)) * w_scale))
+            b_priors.append(tfd.Normal(0, tf.ones(u2) * b_scale))
+        return w_priors, b_priors
+
     def sample_prior_state(self, n_states=1, seed=0):
+        weight_priors, bias_priors = self._get_priors()
         tf.random.set_seed(seed)
         state = []
-        for w_prior, b_prior in zip(self.weight_priors, self.bias_priors):
+        for w_prior, b_prior in zip(weight_priors, bias_priors):
             w = w_prior.sample()
             b = b_prior.sample()
             state.extend([w, b])
@@ -194,9 +220,6 @@ class MapDensityNetwork:
             x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
         )
         return self
-
-    # def train(self, x_train, y_train, batch_size, epochs=120):
-    #     return self.fit(x_train, y_train, batch_size, epochs=120)
 
     def predict(self, x_test):
         return self.network(x_test)
