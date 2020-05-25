@@ -8,7 +8,7 @@ import seaborn as sns
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from core.hmc import HMCDensityNetwork
+from core.hmc import HMCDensityNetwork, hmc_density_network_from_save_path
 from core.last_layer import PostHocLastLayerBayesianEnsemble as LLBEnsemble
 from core.last_layer import PostHocLastLayerBayesianNetwork as LLBNetwork
 from core.map import MapDensityEnsemble, MapDensityNetwork, MapEnsemble
@@ -30,6 +30,10 @@ from data.toy_regression import (
 )
 
 tfd = tfp.distributions
+
+save_dir = ".save_data/"
+save_dir = Path(save_dir)
+save_dir.mkdir(parents=True, exist_ok=True)
 
 figure_dir = "figures/weight_space_visualization"
 figure_dir = Path(figure_dir)
@@ -60,9 +64,12 @@ y_test = ground_truth_periodic_function(_x_test)
 input_shape = [1]
 layer_units = [3, 2]  # [50, 30, 20, 10, 2]
 layer_activations = ["tanh"] * (len(layer_units) - 1) + ["linear"]
-weight_priors = [tfd.Normal(0, 7)] * len(layer_units)
+prior_scale = 7
+weight_priors = [tfd.Normal(0, prior_scale)] * len(layer_units)
 bias_priors = weight_priors
 
+unique_hmc_save_path = f"hmc_n-units-{layer_units}_activations-{layer_activations}_prior-scale-{prior_scale}"
+unique_hmc_save_path = save_dir.joinpath(unique_hmc_save_path)
 
 # %%
 batch_size = 20
@@ -109,6 +116,11 @@ initial_state
 # %% markdown
 # # HMC
 
+
+# %%
+rerun_training = False
+
+
 # %%
 sampler = "nuts"
 num_burnin_steps = 200
@@ -138,17 +150,30 @@ plot_distribution_samples(
     y_lim=[-10, 10],
 )
 # %%
-hmc_net.fit(
-    x_train,
-    y_train,
-    initial_state=initial_state,
-    sampler=sampler,
-    num_burnin_steps=num_burnin_steps,
-    num_results=num_results,
-    num_leapfrog_steps=num_leapfrog_steps,
-    step_size=step_size,
-    verbose=0,
-)
+if rerun_training or not unique_hmc_save_path.is_file():
+    hmc_net = HMCDensityNetwork(
+        input_shape,
+        layer_units,
+        layer_activations,
+        weight_priors=weight_priors,
+        bias_priors=bias_priors,
+        seed=0,
+    )
+    hmc_net.fit(
+        x_train,
+        y_train,
+        initial_state=initial_state,
+        sampler=sampler,
+        num_burnin_steps=num_burnin_steps,
+        num_results=num_results,
+        num_leapfrog_steps=num_leapfrog_steps,
+        step_size=step_size,
+        verbose=0,
+    )
+
+    hmc_net.save(unique_hmc_save_path)
+else:
+    hmc_net = hmc_density_network_from_save_path(unique_hmc_save_path)
 
 
 # %%
