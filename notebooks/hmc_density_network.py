@@ -16,8 +16,8 @@ from core.network_utils import (
 )
 from core.plotting_utils import (
     plot_distribution_samples,
-    plot_predictive_distribution,
-    plot_predictive_distribution_and_function_samples,
+    plot_moment_matched_predictive_normal_distribution,
+    plot_moment_matched_predictive_normal_distribution_and_function_samples,
 )
 from core.preprocessing import preprocess_create_x_train_test
 from data.toy_regression import (
@@ -36,9 +36,6 @@ figure_dir = Path(figure_dir)
 figure_dir.mkdir(parents=True, exist_ok=True)
 
 # %%
-unique_save_path = "hmc_density_example"
-unique_save_path = save_dir.joinpath(unique_save_path)
-
 n_train = 20
 _x_train, y_train = create_split_periodic_data_heteroscedastic(
     n_train=n_train, sigma1=2, sigma2=2, seed=42
@@ -51,8 +48,12 @@ y_test = ground_truth_periodic_function(_x_test)
 input_shape = [1]
 layer_units = [20, 10, 2]  # [50, 30, 20, 10, 2]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
-weight_priors = [tfd.Normal(0, 3)] * len(layer_units)
+prior_scale = 3
+weight_priors = [tfd.Normal(0, prior_scale)] * len(layer_units)
 bias_priors = weight_priors
+
+unique_hmc_save_path = f"hmc_n-units-{layer_units}_activations-{layer_activations}_prior-scale-{prior_scale}"
+unique_hmc_save_path = save_dir.joinpath(unique_hmc_save_path)
 
 
 # %% markdown
@@ -60,17 +61,17 @@ bias_priors = weight_priors
 
 
 # %%
-rerun_training = True
+rerun_training = False
 
 
 # %%
 sampler = "nuts"
-num_burnin_steps = 10
-num_results = 500
+num_burnin_steps = 1000
+num_results = 10000
 num_leapfrog_steps = 15
 step_size = 0.1
 
-if rerun_training:
+if rerun_training or not unique_hmc_save_path.is_file():
     hmc_net = HMCDensityNetwork(
         input_shape,
         layer_units,
@@ -94,9 +95,9 @@ if rerun_training:
         verbose=0,
     )
 
-    hmc_net.save(unique_save_path)
+    hmc_net.save(unique_hmc_save_path)
 else:
-    hmc_net = hmc_density_network_from_save_path(unique_save_path)
+    hmc_net = hmc_density_network_from_save_path(unique_hmc_save_path)
 
 # %% markdown
 # Standard prediction returns an equally weighted mixture of Gaussians. One Gaussian for each parameter setting in the chain.
@@ -104,7 +105,7 @@ else:
 
 # %%
 mog_prediction = hmc_net.predict(x_test, thinning=10)  # Mixture Of Gaussian prediction
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     x_train=_x_train,
@@ -141,7 +142,7 @@ mog_prediction = hmc_net.predict(x_test)  # Mixture Of Gaussian prediction
 gaussian_predictions = hmc_net.predict_list_of_gaussians(
     x_test, n_predictions=n_predictions
 )
-plot_predictive_distribution_and_function_samples(
+plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     distribution_samples=gaussian_predictions,
@@ -178,7 +179,7 @@ map_net.fit(x_train=x_train, y_train=y_train, batch_size=20, epochs=200, verbose
 
 # %%
 prediction = map_net.predict(x_test)
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=prediction,
     x_train=_x_train,
@@ -213,7 +214,7 @@ hmc_net.fit(
 
 # %%
 mog_prediction = hmc_net.predict(x_test, thinning=2)  # Mixture Of Gaussian prediction
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     x_train=_x_train,

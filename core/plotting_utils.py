@@ -5,18 +5,6 @@ import tensorflow as tf
 from sklearn.neighbors import KernelDensity
 
 
-def _plot_data(ax, x, y, c="k", alpha=0.1, label=""):
-    ax.plot(x, y, c=c, alpha=alpha, label=label)
-
-
-def _scatter_data(ax, x, y, c="k", marker="x", label="", s=100):
-    ax.scatter(x, y, c=c, marker=marker, s=s, label=label)
-
-
-def _save_fig(fig, save_path):
-    fig.savefig(save_path)
-
-
 def _normalize_distribution(x_plot, distribution, kde):
     pdf = distribution.prob(x_plot)
     highest_pdf = np.max(pdf)
@@ -26,7 +14,30 @@ def _normalize_distribution(x_plot, distribution, kde):
     return normalized_pdf
 
 
-def plot_predictive_distribution(
+def plot_training_data(x, y, fig=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(x, y, c="k", marker="x", s=100, label="Train data")
+    return fig, ax
+
+
+def plot_validation_data(x, y, fig=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(
+        x, y, c="g", marker="x", s=100, label="Validation data",
+    )
+    return fig, ax
+
+
+def plot_test_data(x, y, c="k", alpha=0.1, label="Test data", fig=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    ax.plot(x, y, c=c, alpha=alpha, label=label)
+    return fig, ax
+
+
+def plot_moment_matched_predictive_normal_distribution(
     x_test,
     predictive_distribution,
     x_train=None,
@@ -40,10 +51,13 @@ def plot_predictive_distribution(
     label="",
     save_path=None,
 ):
+    """
+    Plots the moment-matched Normal distribution to the passed predictive distribution.
+    """
     if fig is None:
         fig, ax = plt.subplots(figsize=(8, 8))
     if y_test is not None:
-        _plot_data(ax, x_test, y_test)
+        plot_test_data(x_test, y_test, ax=ax)
     mean = predictive_distribution.mean().numpy()
     std = predictive_distribution.stddev().numpy()
     label = label if label else "Mean prediction"
@@ -56,26 +70,16 @@ def plot_predictive_distribution(
         label=f"95% HDR prediction",
     )
     if x_train is not None:
-        _scatter_data(
-            ax, x_train, y_train, c="k", marker="x", s=100, label="Train data"
-        )
+        plot_training_data(x_train, y_train, ax=ax)
     if x_validation is not None:
-        _scatter_data(
-            ax,
-            x_validation,
-            y_validation,
-            c="g",
-            marker="x",
-            s=100,
-            label="Validation data",
-        )
+        plot_validation_data(x_validation, y_validation, ax=ax)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     if y_lim:
         ax.set_ylim(y_lim)
     ax.legend()
     if save_path:
-        _save_fig(fig, save_path)
+        fig.savefig(save_path)
     return fig, ax
 
 
@@ -97,8 +101,7 @@ def plot_distribution_samples(
     if fig is None:
         fig, ax = plt.subplots(figsize=(8, 8))
     if y_test is not None:
-        _plot_data(ax, x_test, y_test)
-
+        plot_test_data(x_test, y_test, ax=ax)
     for i, prediction in enumerate(distribution_samples):
         mean = prediction.mean()
         std = prediction.stddev()
@@ -114,30 +117,62 @@ def plot_distribution_samples(
             label=f"95% HDR prediction",
         )
     if x_train is not None:
-        _scatter_data(
-            ax, x_train, y_train, c="k", marker="x", s=100, label="Train data"
-        )
+        plot_training_data(x_train, y_train, ax=ax)
     if x_validation is not None:
-        _scatter_data(
-            ax,
-            x_validation,
-            y_validation,
-            c="g",
-            marker="x",
-            s=100,
-            label="Validation data",
-        )
+        plot_validation_data(x_validation, y_validation, ax=ax)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     if y_lim:
         ax.set_ylim(y_lim)
     ax.legend()
     if save_path:
-        _save_fig(fig, save_path)
+        fig.savefig(save_path)
     return fig, ax
 
 
-def plot_predictive_distribution_and_function_samples(
+def plot_function_samples(
+    x_test,
+    distribution_samples,
+    c=None,
+    x_train=None,
+    y_train=None,
+    x_validation=None,
+    y_validation=None,
+    y_test=None,
+    fig=None,
+    ax=None,
+    y_lim=None,
+    label="",
+    save_path=None,
+):
+    """
+    Plots the means of the passed distributions (i.e. distribution_samples)
+    """
+    if fig is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    if y_test is not None:
+        plot_test_data(x_test, y_test, ax=ax)
+    if c is None:
+        c = sns.color_palette()[1]
+    for i, prediction in enumerate(distribution_samples):
+        mean = prediction.mean()
+        (line,) = ax.plot(x_test, mean, c=c, alpha=0.2)
+    line.set_label("Function samples")
+    if x_train is not None:
+        plot_training_data(x_train, y_train, ax=ax)
+    if x_validation is not None:
+        plot_validation_data(x_validation, y_validation, ax=ax)
+    if y_lim:
+        ax.set_ylim(y_lim)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.legend()
+    if save_path:
+        fig.savefig(save_path)
+    return fig, ax
+
+
+def plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test,
     predictive_distribution,
     distribution_samples,
@@ -152,56 +187,22 @@ def plot_predictive_distribution_and_function_samples(
     label="",
     save_path=None,
 ):
-    if fig is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        _plot_data(ax, x_test, y_test)
-    c = sns.color_palette()[1]
-    for i, prediction in enumerate(distribution_samples[:-1]):
-        mean = prediction.mean()
-        ax.plot(x_test, mean, c=c, alpha=0.2)
-    ax.plot(
+    fig, ax = plot_moment_matched_predictive_normal_distribution(
         x_test,
-        distribution_samples[-1].mean(),
-        label=f"Function samples",
-        c=c,
-        alpha=0.2,
+        predictive_distribution,
+        x_train=x_train,
+        y_train=y_train,
+        x_validation=x_validation,
+        y_validation=y_validation,
+        y_test=y_test,
+        fig=fig,
+        ax=ax,
+        y_lim=y_lim,
+        label=label,
     )
-
-    mean = predictive_distribution.mean().numpy()
-    std = predictive_distribution.stddev().numpy()
-    c = sns.color_palette()[0]
-    label = label if label else "Mean prediction"
-    ax.plot(x_test, mean, label=label, c=c, alpha=1)
-    ax.fill_between(
-        x_test.flatten(),
-        mean.flatten() - 2 * std.flatten(),
-        mean.flatten() + 2 * std.flatten(),
-        color=c,
-        alpha=0.2,
-        label="95% HDR prediction",
+    plot_function_samples(
+        x_test, distribution_samples, fig=fig, ax=ax, save_path=save_path
     )
-    if x_train is not None:
-        _scatter_data(
-            ax, x_train, y_train, c="k", marker="x", s=100, label="Train data"
-        )
-    if x_validation is not None:
-        _scatter_data(
-            ax,
-            x_validation,
-            y_validation,
-            c="g",
-            marker="x",
-            s=100,
-            label="Validation data",
-        )
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    if y_lim:
-        ax.set_ylim(y_lim)
-    ax.legend()
-    if save_path:
-        _save_fig(fig, save_path)
     return fig, ax
 
 

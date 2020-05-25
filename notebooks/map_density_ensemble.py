@@ -12,8 +12,8 @@ from sklearn import preprocessing
 from core.map import MapDensityEnsemble
 from core.plotting_utils import (
     plot_distribution_samples,
-    plot_predictive_distribution,
-    plot_predictive_distribution_and_function_samples,
+    plot_moment_matched_predictive_normal_distribution,
+    plot_moment_matched_predictive_normal_distribution_and_function_samples,
 )
 from core.preprocessing import preprocess_create_x_train_test
 from data.toy_regression import (
@@ -82,7 +82,7 @@ ensemble.fit(
 # %%
 y_lim = [-10, 8]
 mog_prediction = ensemble.predict(x_test)  # Mixture Of Gaussian prediction
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     x_train=_x_train,
@@ -107,7 +107,7 @@ plot_distribution_samples(
 
 # %% codecell
 gaussian_predictions = ensemble.predict_list_of_gaussians(x_test, n_predictions=5)
-plot_predictive_distribution_and_function_samples(
+plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     distribution_samples=gaussian_predictions,

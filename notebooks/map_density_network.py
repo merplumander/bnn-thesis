@@ -6,7 +6,10 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from core.map import MapDensityNetwork
-from core.plotting_utils import plot_distribution_samples, plot_predictive_distribution
+from core.plotting_utils import (
+    plot_distribution_samples,
+    plot_moment_matched_predictive_normal_distribution,
+)
 from core.preprocessing import preprocess_create_x_train_test
 from data.toy_regression import (
     create_split_periodic_data_heteroscedastic,
@@ -34,8 +37,8 @@ layer_units = [100, 50, 20, 10] + [2]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 # values behind the "#" seem to be reasonable for a prior distribution,
 # but in practice we need much lower values for training to succeed
-l2_weight_lambda = 0.0000001  # 2
-l2_bias_lambda = 0.000000001  # 5
+l2_weight_lambda = 0.00001  # 2
+l2_bias_lambda = 0.0000001  # 5
 
 
 # %% codecell
@@ -83,7 +86,7 @@ net.fit(
 
 
 prediction = net.predict(x_test)
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=prediction,
     x_train=_x_train,

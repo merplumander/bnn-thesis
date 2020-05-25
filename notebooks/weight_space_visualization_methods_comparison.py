@@ -18,8 +18,8 @@ from core.network_utils import (
 )
 from core.plotting_utils import (
     plot_distribution_samples,
-    plot_predictive_distribution,
-    plot_predictive_distribution_and_function_samples,
+    plot_moment_matched_predictive_normal_distribution,
+    plot_moment_matched_predictive_normal_distribution_and_function_samples,
     plot_weight_space_first_vs_last_layer,
     plot_weight_space_histogram,
 )
@@ -100,7 +100,7 @@ map_net.fit(
 
 # %%
 prediction = map_net.predict(x_test)
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=prediction,
     x_train=_x_train,
@@ -182,7 +182,7 @@ mog_prediction = hmc_net.predict(x_test, thinning=10)  # Mixture Of Gaussian pre
 gaussian_predictions = hmc_net.predict_list_of_gaussians(
     x_test, n_predictions=n_predictions
 )
-plot_predictive_distribution_and_function_samples(
+plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=mog_prediction,
     distribution_samples=gaussian_predictions,
@@ -221,7 +221,7 @@ llb_net.fit(
 
 prediction = llb_net.predict(x_test)
 
-plot_predictive_distribution(
+plot_moment_matched_predictive_normal_distribution(
     x_test=_x_test,
     predictive_distribution=prediction,
     x_train=_x_train,
@@ -261,7 +261,7 @@ ensemble_weights = ensemble.get_weights()
 
 prediction = ensemble.predict(x_test)
 distribution_samples = ensemble.predict_list_of_gaussians(x_test)
-plot_predictive_distribution_and_function_samples(
+plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=prediction,
     distribution_samples=distribution_samples,
@@ -299,7 +299,7 @@ llb_ensemble_weights = llb_ensemble.get_weights()
 
 prediction = llb_ensemble.predict(x_test)
 distribution_samples = llb_ensemble.predict_list(x_test)
-plot_predictive_distribution_and_function_samples(
+plot_moment_matched_predictive_normal_distribution_and_function_samples(
     x_test=_x_test,
     predictive_distribution=prediction,
     distribution_samples=distribution_samples,
