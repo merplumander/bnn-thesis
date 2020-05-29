@@ -24,9 +24,7 @@ def plot_training_data(x, y, fig=None, ax=None):
 def plot_validation_data(x, y, fig=None, ax=None):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(
-        x, y, c="g", marker="x", s=100, label="Validation data",
-    )
+    ax.scatter(x, y, c="g", marker="x", s=100, label="Validation data")
     return fig, ax
 
 
@@ -206,6 +204,103 @@ def plot_moment_matched_predictive_normal_distribution_and_function_samples(
     return fig, ax
 
 
+def plot_predictive_distribution_by_samples(
+    x_test,
+    predictive_distribution,
+    x_train=None,
+    y_train=None,
+    x_validation=None,
+    y_validation=None,
+    y_test=None,
+    samples_per_location=500,
+    alpha=0.0025,
+    markersize=1.5,
+    c=None,
+    fig=None,
+    ax=None,
+    y_lim=None,
+    label="Predictive distribution",
+    save_path=None,
+):
+    if alpha < 1 / 255:
+        print("Matplotlib cuts off alpha values below 1/255")
+    predictive_samples = predictive_distribution.sample(samples_per_location)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    if y_test is not None:
+        plot_test_data(x_test, y_test, ax=ax)
+    if c is None:
+        c = sns.color_palette()[0]
+    lines = ax.plot(
+        x_test.flatten(),
+        predictive_samples.numpy().T.reshape(-1, samples_per_location),
+        "o",
+        c=c,
+        markersize=markersize,
+        alpha=alpha,
+    )
+    # lines = ax.hexbin(
+    #     np.array(x_test.flatten().tolist() * samples_per_location),
+    #     predictive_samples.numpy().reshape(-1),
+    #     gridsize=200,
+    #     cmap=plt.get_cmap("Blues"),
+    # )
+    lines[-1].set_label(label)
+
+    if x_train is not None:
+        plot_training_data(x_train, y_train, ax=ax)
+    if x_validation is not None:
+        plot_validation_data(x_validation, y_validation, ax=ax)
+    if y_lim:
+        ax.set_ylim(y_lim)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.legend()
+    if save_path:
+        fig.savefig(save_path)
+    return fig, ax
+
+
+def plot_predictive_density(
+    x_test,
+    predictive_distribution,
+    y_lim=[-10, 10],
+    n_y=500,
+    levels=100,
+    x_train=None,
+    y_train=None,
+    x_validation=None,
+    y_validation=None,
+    y_test=None,
+    cmap="Blues",
+    fig=None,
+    ax=None,
+    label="Predictive density",
+    save_path=None,
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    if y_test is not None:
+        plot_test_data(x_test, y_test, ax=ax)
+    y = np.linspace(y_lim[0], y_lim[1], n_y)
+    xx, yy = np.meshgrid(x_test, y)
+
+    zz = predictive_distribution.prob(y).numpy().T
+    ax.contourf(
+        xx, yy, zz, cmap=plt.get_cmap(cmap), levels=levels, label=label,
+    )
+    if x_train is not None:
+        plot_training_data(x_train, y_train, ax=ax)
+    if x_validation is not None:
+        plot_validation_data(x_validation, y_validation, ax=ax)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.legend()
+    if save_path:
+        fig.savefig(save_path)
+    return fig, ax
+
+
 def plot_weight_space_first_vs_last_layer(
     samples_first,
     samples_last,
@@ -312,9 +407,7 @@ def plot_weight_space_histogram(
         )
     if distribution:
         normalized_pdf = _normalize_distribution(x_plot, distribution, kde)
-        ax.plot(
-            x_plot, normalized_pdf, c="k", label="Last Layer Weight Distribution",
-        )
+        ax.plot(x_plot, normalized_pdf, c="k", label="Last Layer Weight Distribution")
     if ensemble_distributions:
         normalized_pdfs = []
         for distribution in ensemble_distributions:
@@ -329,9 +422,7 @@ def plot_weight_space_histogram(
             label="Last Layer Weight Distribution",
         )
         for normalized_pdf in normalized_pdfs:
-            ax.plot(
-                x_plot, normalized_pdf, c="k", alpha=1,
-            )
+            ax.plot(x_plot, normalized_pdf, c="k", alpha=1)
     ax.legend()
     if save_path:
         fig.savefig(save_path)
