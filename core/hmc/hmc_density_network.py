@@ -8,8 +8,9 @@ import tensorflow_probability as tfp
 
 from ..map import MapDensityNetwork
 from ..network_utils import (
+    _linspace_network_indices,
     activation_strings_to_activation_functions,
-    build_scratch_model,
+    build_scratch_density_model,
 )
 
 tfd = tfp.distributions
@@ -89,7 +90,9 @@ class HMCDensityNetwork:
         return log_prob
 
     def log_likelihood(self, current_state, x, y):
-        model = build_scratch_model(current_state, self.layer_activation_functions)
+        model = build_scratch_density_model(
+            current_state, self.layer_activation_functions
+        )
         return tf.reduce_sum(model(x).log_prob(y))
 
     def _target_log_prob_fn_factory(self, x, y):
@@ -97,8 +100,6 @@ class HMCDensityNetwork:
             log_prob = self.log_prior(current_state)
             log_prob += self.log_likelihood(current_state, x, y)
             return log_prob
-            # model = build_scratch_model(current_state, self.layer_activation_functions)
-            # return tf.reduce_sum(model(x_train).log_prob(y_train))
 
         return log_posterior
 
@@ -256,23 +257,16 @@ class HMCDensityNetwork:
         if n_predictions is None:
             loop_over = tf.range(0, n_samples, thinning)
         else:
-            loop_over = tf.cast(
-                tf.math.ceil(
-                    tf.linspace(
-                        0, tf.constant(n_samples - 1, dtype=tf.float32), n_predictions,
-                    )
-                ),
-                tf.int32,
-            )
-            # interval = int(n_samples / n_predictions)
-            # loop_over = tf.range(0, n_samples, interval) + interval - 1
+            loop_over = _linspace_network_indices(n_samples, n_predictions)
         # A network parameterized by a sample from the chain produces a (aleatoric)
         # predictive normal distribution for the x_test. They are all accumulated in
         # this list
         predictive_distributions = []
         for i_sample in loop_over:
             weights_list = [param[i_sample] for param in self.samples]
-            model = build_scratch_model(weights_list, self.layer_activation_functions)
+            model = build_scratch_density_model(
+                weights_list, self.layer_activation_functions
+            )
             prediction = model(x_test)
             predictive_distributions.append(prediction)
         return predictive_distributions
@@ -283,14 +277,27 @@ class HMCDensityNetwork:
     def predict(self, x_test, thinning=1):
         gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
         cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
+        print(cat_probs.shape)
+        print(gaussians[0])
         return self.predict_mixture_of_gaussians(cat_probs, gaussians)
+
+    def predict_epistemic(self, x_test, thinning=1):
+        gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
+        dirac_deltas = []
+        for gaussian in gaussians:
+            delta = tfd.Normal(gaussian.mean(), 1e-8)
+            dirac_deltas.append(delta)
+        cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
+        return self.predict_mixture_of_gaussians(cat_probs, dirac_deltas)
 
     # very useful for debugging
     def predict_list_from_sample_indices(self, x_test, burnin=False, indices=[0]):
         predictive_distributions = []
         for i_sample in indices:
             weights_list = [param[i_sample] for param in self.samples]
-            model = build_scratch_model(weights_list, self.layer_activation_functions)
+            model = build_scratch_density_model(
+                weights_list, self.layer_activation_functions
+            )
             prediction = model(x_test)
             predictive_distributions.append(prediction)
         return predictive_distributions
@@ -301,7 +308,9 @@ class HMCDensityNetwork:
         sample_parameters is a list of tensors or arrays specifying the network
         parameters.
         """
-        model = build_scratch_model(sample_parameters, self.layer_activation_functions)
+        model = build_scratch_density_model(
+            sample_parameters, self.layer_activation_functions
+        )
         prediction = model(x_test)
         return prediction
 
