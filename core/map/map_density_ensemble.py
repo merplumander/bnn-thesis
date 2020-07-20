@@ -4,6 +4,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from ..network_utils import (
+    _linspace_network_indices,
     build_keras_model,
     regularization_lambda_to_prior_scale,
     transform_unconstrained_scale,
@@ -22,10 +23,10 @@ class MapDensityEnsemble:
         l2_bias_lambda=None,
         layer_activations=["relu", "relu", "linear"],
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
-        seed=0,
+        seed=0,  # can be number or Iterable of numbers
     ):
         """
-        Class that represents an ensemble of Map (currently ML) trained neural networks.
+        Class that represents an ensemble of Map trained neural networks.
         Each network is trained to minimize the (gaussian) log likelihood of the data
         and learns both the mean and the variance of this gaussian. Each network thereby
         represents aleatoric uncertainty. Taken together as an ensemble, epistemic
@@ -40,12 +41,15 @@ class MapDensityEnsemble:
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
         self.learning_rate = learning_rate
-        self.seed = seed
         if not isinstance(self.l2_weight_lambda, Iterable):
             self.l2_weight_lambda = [self.l2_weight_lambda] * self.n_networks
         if not isinstance(self.l2_bias_lambda, Iterable):
             self.l2_bias_lambda = [self.l2_bias_lambda] * self.n_networks
-        tf.random.set_seed(self.seed)
+        if not isinstance(seed, Iterable):
+            seed = [seed + (i / self.n_networks) for i in range(self.n_networks)]
+        self.seed = seed
+        tf.random.set_seed(self.seed[0])
+
         self.networks = [
             MapDensityNetwork(
                 self.input_shape,
@@ -54,15 +58,15 @@ class MapDensityEnsemble:
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
                 learning_rate=self.learning_rate,
-                seed=self.seed + i,
+                seed=seed,
             )
-            for i, l2_weight_lambda, l2_bias_lambda in zip(
-                range(self.n_networks), self.l2_weight_lambda, self.l2_bias_lambda
+            for l2_weight_lambda, l2_bias_lambda, seed in zip(
+                self.l2_weight_lambda, self.l2_bias_lambda, self.seed,
             )
         ]
 
     def fit(self, x_train, y_train, batch_size, epochs=200, verbose=1):
-        tf.random.set_seed(self.seed)
+        tf.random.set_seed(self.seed[0])
         if not isinstance(epochs, Iterable):
             epochs = [epochs] * self.n_networks
         for network, epoch in zip(self.networks, epochs):
@@ -75,18 +79,7 @@ class MapDensityEnsemble:
         if n_predictions is None:
             loop_indices = tf.range(0, self.n_networks)
         else:
-            # think: tf.linspace(0, self.n_networks - 1, n_predictions).
-            # The rest is just annoying tensorflow issues
-            loop_indices = tf.cast(
-                tf.math.ceil(
-                    tf.linspace(
-                        0,
-                        tf.constant(self.n_networks - 1, dtype=tf.float32),
-                        n_predictions,
-                    )
-                ),
-                tf.int32,
-            )
+            loop_indices = _linspace_network_indices(self.n_networks, n_predictions)
         predictive_distributions = []
         for i in loop_indices:
             predictive_distributions.append(self.networks[i](x_test))
@@ -120,6 +113,7 @@ class MapDensityNetwork:
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
+        names=None,
         seed=0,
     ):
         self.input_shape = input_shape
@@ -127,6 +121,7 @@ class MapDensityNetwork:
         self.layer_activations = layer_activations
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
+        self.names = names
         self.learning_rate = learning_rate
         self.seed = seed
         tf.random.set_seed(self.seed)
@@ -137,6 +132,7 @@ class MapDensityNetwork:
             self.layer_activations,
             l2_weight_lambda=self.l2_weight_lambda,
             l2_bias_lambda=self.l2_bias_lambda,
+            names=self.names,
         )
         self.network.add(
             tfp.layers.DistributionLambda(

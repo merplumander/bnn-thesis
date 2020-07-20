@@ -12,10 +12,12 @@ from sklearn import preprocessing
 from core.map import MapDensityEnsemble
 from core.plotting_utils import (
     plot_distribution_samples,
+    plot_ground_truth,
     plot_moment_matched_predictive_normal_distribution,
     plot_moment_matched_predictive_normal_distribution_and_function_samples,
+    plot_training_data,
 )
-from core.preprocessing import preprocess_create_x_train_test
+from core.preprocessing import StandardPreprocessor
 from data.toy_regression import (
     create_split_periodic_data_heteroscedastic,
     ground_truth_periodic_function,
@@ -38,21 +40,21 @@ batchsize_train = 20
 
 # train and test variables beginning with an underscore are unprocessed.
 _x_train, y_train = create_split_periodic_data_heteroscedastic(
-    n_train=n_train, sigma1=2, sigma2=2, seed=42
+    n_data=n_train, sigma1=2, sigma2=2, seed=42
 )
-x_train, _x_test, x_test = preprocess_create_x_train_test(_x_train)
-y_test = ground_truth_periodic_function(_x_test)
+preprocessor = StandardPreprocessor()
+x_train, _x_plot, x_plot = preprocessor.preprocess_create_x_train_x_plot(_x_train)
+y_ground_truth = ground_truth_periodic_function(_x_plot)
 
-layer_units = [500] * 4 + [2]
-layer_activations = ["relu"] * 4 + ["linear"]
+layer_units = [50, 20, 10] + [2]
+layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
 
 # %% codecell
-fig, ax = plt.subplots()
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.scatter(_x_train, y_train, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
+y_lim = [-8, 8]
+fig, ax = plt.subplots(figsize=(8, 8))
+plot_training_data(_x_train, y_train, fig=fig, ax=ax, y_lim=y_lim)
+plot_ground_truth(_x_plot, y_ground_truth, fig=fig, ax=ax)
 ax.legend()
 
 
@@ -75,45 +77,43 @@ ensemble = MapDensityEnsemble(
 
 # %% codecell
 ensemble.fit(
-    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=150, verbose=0
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=500, verbose=0
 )
 
 
 # %%
-y_lim = [-10, 8]
-mog_prediction = ensemble.predict(x_test)  # Mixture Of Gaussian prediction
+mog_prediction = ensemble.predict(x_plot)  # Mixture Of Gaussian prediction
 plot_moment_matched_predictive_normal_distribution(
-    x_test=_x_test,
+    x_plot=_x_plot,
     predictive_distribution=mog_prediction,
     x_train=_x_train,
     y_train=y_train,
-    y_test=y_test,
+    y_ground_truth=y_ground_truth,
     y_lim=y_lim,
 )
 
 
 # %% codecell
-gaussian_predictions = ensemble.predict_list_of_gaussians(x_test, n_predictions=3)
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_plot, n_predictions=3)
 plot_distribution_samples(
-    x_test=_x_test,
+    x_plot=_x_plot,
     distribution_samples=gaussian_predictions,
     x_train=_x_train,
     y_train=y_train,
-    y_test=y_test,
+    y_ground_truth=y_ground_truth,
     y_lim=y_lim,
 )
 # fig.savefig(os.path.join(figure_dir, f"{n_networks}_ml_density_ensemble_mixture_of_gaussian_heteroscedastic.pdf"))
 
 
 # %% codecell
-gaussian_predictions = ensemble.predict_list_of_gaussians(x_test, n_predictions=5)
+gaussian_predictions = ensemble.predict_list_of_gaussians(x_plot, n_predictions=5)
 plot_moment_matched_predictive_normal_distribution_and_function_samples(
-    x_test=_x_test,
+    x_plot=_x_plot,
     predictive_distribution=mog_prediction,
     distribution_samples=gaussian_predictions,
     x_train=_x_train,
     y_train=y_train,
-    y_test=y_test,
+    y_ground_truth=y_ground_truth,
     y_lim=y_lim,
 )
-# fig.savefig(os.path.join(figure_dir, f"{n_networks}_ml_density_ensemble_gaussian_samples_heteroscedastic.pdf"))
