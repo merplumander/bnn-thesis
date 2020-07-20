@@ -1,2 +1,2 @@
 from .hmc_density_network import HMCDensityNetwork, hmc_density_network_from_save_path
-from .hmc_network import HMCNetwork
+from .hmc_network import HMCNetwork, hmc_network_from_save_path

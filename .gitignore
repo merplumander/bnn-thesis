@@ -19,3 +19,5 @@ logs
 .save_data
 notebooks/experimental
 test.py
+fBBN_GP_Posterior.md
+*.ipynb
