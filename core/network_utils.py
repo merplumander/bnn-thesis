@@ -7,6 +7,25 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 
+def _linspace_network_indices(n_networks, n_predictions):
+    """
+    Function to compute the indices of the networks or samples to use for prediction
+    (since for HMC you want the network samples used for prediction to be as far apart
+    as possible).
+    think: tf.linspace(0, self.n_networks - 1, n_predictions).
+    The rest is just annoying tensorflow issues
+    """
+    indices = tf.cast(
+        tf.math.ceil(
+            tf.linspace(
+                0, tf.constant(n_networks - 1, dtype=tf.float32), n_predictions,
+            )
+        ),
+        tf.int32,
+    )
+    return indices
+
+
 def regularization_lambda_to_prior_scale(regularization_lambda):
     """
     Takes the regularization parameter lambda of L2 regularization and outputs the scale
@@ -60,11 +79,12 @@ def dense_layer(inputs, w, b, activation=tf.identity):
     return activation(tf.matmul(inputs, w) + b)
 
 
-def build_scratch_model(weights_list, layer_activation_functions):
+def build_scratch_density_model(weights_list, layer_activation_functions):
     """
     Building a tensorflow model from scratch (i.e. without keras and tf.layers).
     This is needed for HMC, since sampling cannot deal with keras objects
-    for some reason. Probably this way it is also faster, since keras layers have a lot of additional functionality.
+    for some reason. Probably this way it is also faster, since keras layers have a lot
+    of additional functionality.
 
     Args:
         weights_list (list):      Flat list of weights and biases of the network
@@ -81,6 +101,31 @@ def build_scratch_model(weights_list, layer_activation_functions):
         return tfd.Normal(
             loc=X[..., :1], scale=transform_unconstrained_scale(X[..., 1:])
         )
+
+    return model
+
+
+def build_scratch_model(weights_list, noise_std, layer_activation_functions):
+    """
+    Building a tensorflow model from scratch (i.e. without keras and tf.layers).
+    This is needed for HMC, since sampling cannot deal with keras objects
+    for some reason. Probably this way it is also faster, since keras layers have a lot
+    of additional functionality.
+
+    Args:
+        weights_list (list):      Flat list of weights and biases of the network
+                                  (must have an even number of elements)
+        noise_std (float):        Noise standard deviation
+        layer_activations (list): List of tensorflow activation functions
+                                  (must have half as many elements as weights_list)
+    """
+
+    def model(X):
+        for w, b, activation in zip(
+            weights_list[::2], weights_list[1::2], layer_activation_functions
+        ):
+            X = dense_layer(X, w, b, activation)
+        return tfd.Normal(loc=X[..., :1], scale=noise_std)
 
     return model
 

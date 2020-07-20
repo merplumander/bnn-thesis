@@ -6,6 +6,9 @@ from sklearn.neighbors import KernelDensity
 
 
 def _normalize_distribution(x_plot, distribution, kde):
+    """
+    used to "normalize" distribution to the height of the kde at that point
+    """
     pdf = distribution.prob(x_plot)
     highest_pdf = np.max(pdf)
     mean = distribution.mean().numpy().reshape(1, 1)
@@ -14,10 +17,30 @@ def _normalize_distribution(x_plot, distribution, kde):
     return normalized_pdf
 
 
-def plot_training_data(x, y, fig=None, ax=None):
+def _distribution_to_highest_point(
+    x_plot, distribution, highest_kde, factor_height_point_estimate
+):
+    """
+    used to fit distribution to highest point of kde
+    """
+    pdf = distribution.prob(x_plot)
+    highest_pdf = np.max(pdf)
+    normalized_pdf = pdf * highest_kde / highest_pdf * factor_height_point_estimate
+    return normalized_pdf
+
+
+def plot_training_data(
+    x, y, fig=None, ax=None, figsize=None, x_lim=None, y_lim=None, alpha=1
+):
+    if figsize is None:
+        figsize = (8, 8)
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(x, y, c="k", marker="x", s=100, label="Train data")
+        fig, ax = plt.subplots(figsize=figsize)
+    ax.scatter(x, y, c="k", alpha=alpha, marker="x", s=100, label="Train data")
+    if x_lim:
+        ax.set_xlim(x_lim)
+    if y_lim:
+        ax.set_ylim(y_lim)
     return fig, ax
 
 
@@ -28,7 +51,7 @@ def plot_validation_data(x, y, fig=None, ax=None):
     return fig, ax
 
 
-def plot_test_data(x, y, c="k", alpha=0.1, label="Test data", fig=None, ax=None):
+def plot_ground_truth(x, y, c="k", alpha=0.1, label="Ground truth", fig=None, ax=None):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
     ax.plot(x, y, c=c, alpha=alpha, label=label)
@@ -36,17 +59,20 @@ def plot_test_data(x, y, c="k", alpha=0.1, label="Test data", fig=None, ax=None)
 
 
 def plot_moment_matched_predictive_normal_distribution(
-    x_test,
+    x_plot,
     predictive_distribution,
     x_train=None,
     y_train=None,
     x_validation=None,
     y_validation=None,
-    y_test=None,
+    y_ground_truth=None,
     fig=None,
     ax=None,
+    show_hdr=True,
     y_lim=None,
     label="",
+    title="",
+    no_ticks=True,
     save_path=None,
 ):
     """
@@ -54,64 +80,19 @@ def plot_moment_matched_predictive_normal_distribution(
     """
     if fig is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        plot_test_data(x_test, y_test, ax=ax)
+    fig.suptitle(title, fontsize=15)
+    if y_ground_truth is not None:
+        plot_ground_truth(x_plot, y_ground_truth, ax=ax)
     mean = predictive_distribution.mean().numpy()
     std = predictive_distribution.stddev().numpy()
     label = label if label else "Mean prediction"
-    ax.plot(x_test, mean, label=label, alpha=0.8)
-    ax.fill_between(
-        x_test.flatten(),
-        mean.flatten() - 2 * std.flatten(),
-        mean.flatten() + 2 * std.flatten(),
-        alpha=0.2,
-        label=f"95% HDR prediction",
-    )
-    if x_train is not None:
-        plot_training_data(x_train, y_train, ax=ax)
-    if x_validation is not None:
-        plot_validation_data(x_validation, y_validation, ax=ax)
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    if y_lim:
-        ax.set_ylim(y_lim)
-    ax.legend()
-    if save_path:
-        fig.savefig(save_path)
-    return fig, ax
-
-
-def plot_distribution_samples(
-    x_test,
-    distribution_samples,
-    x_train=None,
-    y_train=None,
-    x_validation=None,
-    y_validation=None,
-    y_test=None,
-    fig=None,
-    ax=None,
-    y_lim=None,
-    seaborn_pallet_starting_index=0,
-    labels=[],
-    save_path=None,
-):
-    if fig is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        plot_test_data(x_test, y_test, ax=ax)
-    for i, prediction in enumerate(distribution_samples):
-        mean = prediction.mean()
-        std = prediction.stddev()
-        c = sns.color_palette()[i + seaborn_pallet_starting_index]
-        label = labels[i] if labels else "Mean prediction"
-        ax.plot(x_test, mean, label=label, c=c, alpha=0.8)
+    ax.plot(x_plot, mean, label=label, alpha=0.8)
+    if show_hdr:
         ax.fill_between(
-            x_test.flatten(),
-            tf.reshape(mean, [mean.shape[0]]) - 2 * tf.reshape(std, [std.shape[0]]),
-            tf.reshape(mean, [mean.shape[0]]) + 2 * tf.reshape(std, [std.shape[0]]),
-            color=c,
-            alpha=0.15,
+            x_plot.flatten(),
+            mean.flatten() - 2 * std.flatten(),
+            mean.flatten() + 2 * std.flatten(),
+            alpha=0.2,
             label=f"95% HDR prediction",
         )
     if x_train is not None:
@@ -123,20 +104,71 @@ def plot_distribution_samples(
     if y_lim:
         ax.set_ylim(y_lim)
     ax.legend()
+    if no_ticks:
+        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
+    return fig, ax
+
+
+def plot_distribution_samples(
+    x_plot,
+    distribution_samples,
+    x_train=None,
+    y_train=None,
+    x_validation=None,
+    y_validation=None,
+    y_ground_truth=None,
+    fig=None,
+    ax=None,
+    show_hdr=True,
+    y_lim=None,
+    seaborn_pallet_starting_index=0,
+    labels=[],
+    save_path=None,
+):
+    if fig is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    if y_ground_truth is not None:
+        plot_ground_truth(x_plot, y_ground_truth, ax=ax)
+    for i, prediction in enumerate(distribution_samples):
+        mean = prediction.mean()
+        std = prediction.stddev()
+        c = sns.color_palette()[i + seaborn_pallet_starting_index]
+        label = labels[i] if labels else "Mean prediction"
+        ax.plot(x_plot, mean, label=label, c=c, alpha=0.8)
+        if show_hdr:
+            ax.fill_between(
+                x_plot.flatten(),
+                tf.reshape(mean, [mean.shape[0]]) - 2 * tf.reshape(std, [std.shape[0]]),
+                tf.reshape(mean, [mean.shape[0]]) + 2 * tf.reshape(std, [std.shape[0]]),
+                color=c,
+                alpha=0.15,
+                label=f"95% HDR prediction",
+            )
+    if x_train is not None:
+        plot_training_data(x_train, y_train, ax=ax)
+    if x_validation is not None:
+        plot_validation_data(x_validation, y_validation, ax=ax)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    if y_lim:
+        ax.set_ylim(y_lim)
+    ax.legend()
+    if save_path:
+        fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
 
 
 def plot_function_samples(
-    x_test,
+    x_plot,
     distribution_samples,
     c=None,
     x_train=None,
     y_train=None,
     x_validation=None,
     y_validation=None,
-    y_test=None,
+    y_ground_truth=None,
     fig=None,
     ax=None,
     y_lim=None,
@@ -148,13 +180,13 @@ def plot_function_samples(
     """
     if fig is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        plot_test_data(x_test, y_test, ax=ax)
+    if y_ground_truth is not None:
+        plot_ground_truth(x_plot, y_ground_truth, ax=ax)
     if c is None:
         c = sns.color_palette()[1]
     for i, prediction in enumerate(distribution_samples):
         mean = prediction.mean()
-        (line,) = ax.plot(x_test, mean, c=c, alpha=0.2)
+        (line,) = ax.plot(x_plot, mean, c=c, alpha=0.2)
     line.set_label("Function samples")
     if x_train is not None:
         plot_training_data(x_train, y_train, ax=ax)
@@ -166,52 +198,58 @@ def plot_function_samples(
     ax.set_ylabel("y")
     ax.legend()
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
 
 
 def plot_moment_matched_predictive_normal_distribution_and_function_samples(
-    x_test,
+    x_plot,
     predictive_distribution,
     distribution_samples,
     x_train=None,
     y_train=None,
     x_validation=None,
     y_validation=None,
-    y_test=None,
+    y_ground_truth=None,
     fig=None,
     ax=None,
+    show_hdr=True,
     y_lim=None,
     label="",
+    title="",
+    no_ticks=True,
     save_path=None,
 ):
     fig, ax = plot_moment_matched_predictive_normal_distribution(
-        x_test,
+        x_plot,
         predictive_distribution,
         x_train=x_train,
         y_train=y_train,
         x_validation=x_validation,
         y_validation=y_validation,
-        y_test=y_test,
+        y_ground_truth=y_ground_truth,
         fig=fig,
         ax=ax,
+        show_hdr=show_hdr,
         y_lim=y_lim,
         label=label,
+        title=title,
+        no_ticks=no_ticks,
     )
     plot_function_samples(
-        x_test, distribution_samples, fig=fig, ax=ax, save_path=save_path
+        x_plot, distribution_samples, fig=fig, ax=ax, save_path=save_path
     )
     return fig, ax
 
 
 def plot_predictive_distribution_by_samples(
-    x_test,
+    x_plot,
     predictive_distribution,
     x_train=None,
     y_train=None,
     x_validation=None,
     y_validation=None,
-    y_test=None,
+    y_ground_truth=None,
     samples_per_location=500,
     alpha=0.0025,
     markersize=1.5,
@@ -227,12 +265,12 @@ def plot_predictive_distribution_by_samples(
     predictive_samples = predictive_distribution.sample(samples_per_location)
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        plot_test_data(x_test, y_test, ax=ax)
+    if y_ground_truth is not None:
+        plot_ground_truth(x_plot, y_ground_truth, ax=ax)
     if c is None:
         c = sns.color_palette()[0]
     lines = ax.plot(
-        x_test.flatten(),
+        x_plot.flatten(),
         predictive_samples.numpy().T.reshape(-1, samples_per_location),
         "o",
         c=c,
@@ -240,7 +278,7 @@ def plot_predictive_distribution_by_samples(
         alpha=alpha,
     )
     # lines = ax.hexbin(
-    #     np.array(x_test.flatten().tolist() * samples_per_location),
+    #     np.array(x_plot.flatten().tolist() * samples_per_location),
     #     predictive_samples.numpy().reshape(-1),
     #     gridsize=200,
     #     cmap=plt.get_cmap("Blues"),
@@ -257,12 +295,12 @@ def plot_predictive_distribution_by_samples(
     ax.set_ylabel("y")
     ax.legend()
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
 
 
 def plot_predictive_density(
-    x_test,
+    x_plot,
     predictive_distribution,
     y_lim=[-10, 10],
     n_y=500,
@@ -271,7 +309,7 @@ def plot_predictive_density(
     y_train=None,
     x_validation=None,
     y_validation=None,
-    y_test=None,
+    y_ground_truth=None,
     cmap="Blues",
     fig=None,
     ax=None,
@@ -280,15 +318,13 @@ def plot_predictive_density(
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-    if y_test is not None:
-        plot_test_data(x_test, y_test, ax=ax)
+    if y_ground_truth is not None:
+        plot_ground_truth(x_plot, y_ground_truth, ax=ax)
     y = np.linspace(y_lim[0], y_lim[1], n_y)
-    xx, yy = np.meshgrid(x_test, y)
+    xx, yy = np.meshgrid(x_plot, y)
 
     zz = predictive_distribution.prob(y).numpy().T
-    ax.contourf(
-        xx, yy, zz, cmap=plt.get_cmap(cmap), levels=levels, label=label,
-    )
+    ax.contourf(xx, yy, zz, cmap=plt.get_cmap(cmap), levels=levels, label=label)
     if x_train is not None:
         plot_training_data(x_train, y_train, ax=ax)
     if x_validation is not None:
@@ -297,7 +333,7 @@ def plot_predictive_density(
     ax.set_ylabel("y")
     ax.legend()
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
 
 
@@ -318,10 +354,12 @@ def plot_weight_space_first_vs_last_layer(
     distribution_last=None,
     ensemble_distributions_last=None,
     fig_title="",
+    y_lim1=None,
+    y_lim2=None,
     save_path=None,
 ):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
-    fig.suptitle(fig_title)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    fig.suptitle(fig_title, fontsize=15)
     ax1.set_title("Input to hidden layer weight")
     plot_weight_space_histogram(
         samples_first,
@@ -336,6 +374,7 @@ def plot_weight_space_first_vs_last_layer(
         fig=fig,
         ax=ax1,
     )
+    ax1.set_ylim(y_lim1)
     ax2.set_title("Hidden to output layer weight")
     plot_weight_space_histogram(
         samples_last,
@@ -351,8 +390,9 @@ def plot_weight_space_first_vs_last_layer(
         fig=fig,
         ax=ax2,
     )
+    ax2.set_ylim(y_lim2)
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
 
 
 def plot_weight_space_histogram(
@@ -371,6 +411,8 @@ def plot_weight_space_histogram(
     ax=None,
     save_path=None,
 ):
+    # point_estimate_width = 6
+    # factor_height_point_estimate = 1.0
     if fig is None and ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
     kde = KernelDensity(kernel="gaussian", bandwidth=kde_bandwidth).fit(
@@ -382,48 +424,129 @@ def plot_weight_space_histogram(
         d = x_max - x_min
         x_plot = np.linspace(x_min - 0.1 * d, x_max + 0.1 * d, 1000)
     kde_sample_density = np.exp(kde.score_samples(x_plot[:, None]))
-    ax.plot(x_plot, kde_sample_density, alpha=0.5, label="HMC Ground Truth")
-
+    c = sns.color_palette()[0]
+    ax.plot(x_plot, kde_sample_density, c=c, alpha=1, label="HMC")
+    lines, labels = ax.get_legend_handles_labels()
+    c = sns.color_palette()[2]
     if point_estimate:
-        ax.scatter(
+        # # Plot lines
+        # ax.vlines(
+        #     point_estimate,
+        #     0,
+        #     np.max(kde_sample_density) * factor_height_point_estimate,
+        #     color="k",
+        #     linewidths=point_estimate_width,
+        #     label="MAP Point Estimate",
+        # )
+        # Plot points
+        line = ax.scatter(
             point_estimate,
             np.exp(kde.score_samples(point_estimate.reshape(1, 1))),
             s=100,
-            c="k",
-            label="MAP Point Estimate",
+            c=c,
+            label="MAP",
         )
+        lines.append(line)
+        labels.append("MAP")
     if ensemble_point_estimates:
         # if ensemble_colour_indices is None:
         #     ensemble_colour_indices = np.arange(len(ensemble_point_estimates))
         # c = [sns.color_palette()[i] for i in ensemble_colour_indices]
         ensemble_point_estimates = np.array(ensemble_point_estimates)
-        ax.scatter(
+        # # Plot Lines
+        # ax.vlines(
+        #     ensemble_point_estimates,
+        #     0,
+        #     np.max(kde_sample_density) * factor_height_point_estimate / len(ensemble_point_estimates),
+        #     color="k",
+        #     linewidths=point_estimate_width,
+        #     label="Ensemble Point Estimates",
+        # )
+        # Plot points
+        line = ax.scatter(
             ensemble_point_estimates,
             np.exp(kde.score_samples(ensemble_point_estimates.reshape(-1, 1))),
             s=100,
-            c="k",
-            alpha=0.6,
-            label="Ensemble Point Estimates",
+            c=c,
+            alpha=1,
+            label="MAP Ensemble",
         )
+        lines.append(line)
+        labels.append("MAP Ensemble")
     if distribution:
-        normalized_pdf = _normalize_distribution(x_plot, distribution, kde)
-        ax.plot(x_plot, normalized_pdf, c="k", label="Last Layer Weight Distribution")
+        # # 'normalized' to kde height
+        # normalized_pdf = _normalize_distribution(x_plot, distribution, kde)
+
+        # # 'normalized' to highest point
+        # normalized_pdf = _distribution_to_highest_point(
+        #     x_plot,
+        #     distribution,
+        #     np.max(kde_sample_density),
+        #     factor_height_point_estimate,
+        # )
+        # # no normalization
+        # ax.plot(x_plot, distribution.prob(x_plot), c="k", label="Last Layer Weight Distribution")
+        pdf = distribution.prob(x_plot)
+        twin_ax = ax.twinx()
+        twin_ax.plot(x_plot, pdf, c=c, label="Last-Layer Distribution")
+        _lines, _labels = twin_ax.get_legend_handles_labels()
+        lines += _lines
+        labels += _labels
+        twin_ax.yaxis.set_major_locator(plt.MaxNLocator(3))
     if ensemble_distributions:
         normalized_pdfs = []
+        means = []
         for distribution in ensemble_distributions:
-            normalized_pdfs.append(_normalize_distribution(x_plot, distribution, kde))
+            # # 'normalized' to kde at that point
+            # normalized_pdfs.append(_normalize_distribution(x_plot, distribution, kde))
+
+            # # 'normalized' to highest point
+            # normalized_pdfs.append(
+            #     _distribution_to_highest_point(
+            #         x_plot, distribution, np.max(kde_sample_density), factor_height_point_estimate
+            #     ) / len(ensemble_distributions)
+            # )
+
+            # no normalization
+            normalized_pdfs.append(
+                distribution.prob(x_plot) / len(ensemble_distributions)
+            )
+            means.append(distribution.mean().numpy())
         normalized_pdfs = np.array(normalized_pdfs)
-        print(normalized_pdfs.shape)
-        ax.plot(
-            x_plot,
-            np.sum(normalized_pdfs, axis=0),
-            c="k",
-            alpha=0.0,
-            label="Last Layer Weight Distribution",
+        means = np.array(means)
+        # Plot mixture
+        mixture = np.sum(normalized_pdfs, axis=0)
+        # highest_mixture = np.max(mixture)
+        # highest_kde = np.max(kde_sample_density)
+        # mixture = mixture * highest_kde / highest_mixture
+        twin_ax = ax.twinx()
+        twin_ax.plot(
+            x_plot, mixture, c=c, alpha=1, label="Last-Layer Distribution",
         )
-        for normalized_pdf in normalized_pdfs:
-            ax.plot(x_plot, normalized_pdf, c="k", alpha=1)
-    ax.legend()
+        _lines, _labels = twin_ax.get_legend_handles_labels()
+        lines += _lines
+        labels += _labels
+        twin_ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        # # Plot individual distributions
+        # for normalized_pdf in normalized_pdfs:
+        #     ax.plot(x_plot, normalized_pdf, c="k", alpha=0)
+
+        # # Plot means
+        # ax.scatter(
+        #     means,
+        #     np.zeros_like(means),
+        #     s=20,
+        #     c=c,
+        #     alpha=1,
+        #     # label="Ensemble Point Estimates",
+        # )
+    # ax.tick_params(axis="both", which="major", labelsize=12)
+    # start, end = ax.get_xlim()
+    # ax.xaxis.set_ticks(np.arange(start, end, 5))
+    ax.xaxis.set_major_locator(plt.MaxNLocator(3))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+
+    ax.legend(lines, labels)
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(save_path, bbox_inches="tight")
     return fig, ax

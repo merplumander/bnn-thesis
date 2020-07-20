@@ -6,7 +6,12 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from core.map import MapNetwork
-from core.preprocessing import preprocess_create_x_train_test
+from core.plotting_utils import (
+    plot_ground_truth,
+    plot_moment_matched_predictive_normal_distribution,
+    plot_training_data,
+)
+from core.preprocessing import StandardPreprocessor
 from data.toy_regression import (
     create_split_periodic_data_heteroscedastic,
     ground_truth_periodic_function,
@@ -21,21 +26,23 @@ n_train = 20
 batchsize_train = 20
 
 # train and test variables beginning with an underscore are unprocessed.
-_x_train, y_train = create_split_periodic_data_heteroscedastic(n_train=n_train, seed=42)
-x_train, _x_test, x_test = preprocess_create_x_train_test(_x_train)
-y_test = ground_truth_periodic_function(_x_test)
+_x_train, y_train = create_split_periodic_data_heteroscedastic(n_data=n_train, seed=42)
+preprocessor = StandardPreprocessor()
+x_train, _x_plot, x_plot = preprocessor.preprocess_create_x_train_x_plot(
+    _x_train, test_ds=0.5
+)
+y_ground_truth = ground_truth_periodic_function(_x_plot)
 
 
-layer_units = [500] * 4 + [1]
-layer_activations = ["relu"] * 4 + ["linear"]
+layer_units = [50, 20] + [1]
+layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
 
 # %% codecell
-fig, ax = plt.subplots()
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.scatter(_x_train, y_train, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
+y_lim = [-5, 5]
+fig, ax = plt.subplots(figsize=(8, 8))
+plot_training_data(_x_train, y_train, fig=fig, ax=ax, y_lim=y_lim)
+plot_ground_truth(_x_plot, y_ground_truth, fig=fig, ax=ax)
 ax.legend()
 
 
@@ -57,17 +64,33 @@ net = MapNetwork(
 
 # %% codecell
 net.fit(
-    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=120, verbose=0
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=200, verbose=0
 )
 
 # %%
-prediction = net.predict(x_test)
+# prediction = net.predict_mean_function(x_plot) # getting predictive mean as array
+predictive_normal_distribution = net.predict(
+    x_plot
+)  # getting predictive normal distribution with estimated sample standard deviation as tf distribution
+predictive_delta_distribution = net.predict_delta_distribution(x_plot)
 
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(_x_test, y_test, label="Ground truth", alpha=0.1)
-ax.plot(_x_test, prediction, label=f"Prediction", alpha=0.8)
-ax.scatter(_x_train, y_train, c="k", marker="x", s=100, label="Train data")
-ax.set_xlabel("")
-ax.set_ylabel("")
-ax.set_ylim([-5, 5])
-ax.legend()
+plot_moment_matched_predictive_normal_distribution(
+    x_plot=_x_plot,
+    predictive_distribution=predictive_delta_distribution,
+    x_train=_x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    show_hdr=False,
+    y_lim=y_lim,
+    title=f"Predictive delta distribution",
+)
+
+plot_moment_matched_predictive_normal_distribution(
+    x_plot=_x_plot,
+    predictive_distribution=predictive_normal_distribution,
+    x_train=_x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
+    title=f"Predictive normal distribution (Std defined by residuals)",
+)
