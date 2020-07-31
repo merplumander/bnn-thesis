@@ -70,7 +70,7 @@ bias_priors = weight_priors
 
 
 # %%
-rerun_training = False
+rerun_training = True
 
 # %%
 sampler = "hmc"
@@ -79,7 +79,7 @@ num_results = 1000
 num_leapfrog_steps = 25
 step_size = 0.1
 
-unique_hmc_save_path = f"deletable-hmc_n-units-{layer_units}_activations-{layer_activations}_prior-scale-{prior_scale}_sampler-{sampler}_data-x3-gap"
+unique_hmc_save_path = f"deletable-hmc_n-units-{layer_units}_activations-{layer_activations}_prior-scale-{prior_scale}_sampler-{sampler}_data-x3-gap_unconstrained-scale"
 unique_hmc_save_path = save_dir.joinpath(unique_hmc_save_path)
 
 
@@ -89,16 +89,17 @@ if rerun_training or not unique_hmc_save_path.is_file():
         [1],
         layer_units,
         layer_activations,
+        transform_unconstrained_scale_factor=0.2,
         weight_priors=weight_priors,
         bias_priors=bias_priors,
         std_prior=tfd.Normal(0.3, 0.01),
+        sampler=sampler,
         seed=0,
     )
 
     hmc_net.fit(
         x_train,
         y_train,
-        sampler=sampler,
         num_burnin_steps=num_burnin_steps,
         num_results=num_results,
         num_leapfrog_steps=num_leapfrog_steps,
@@ -113,6 +114,15 @@ if rerun_training or not unique_hmc_save_path.is_file():
 else:
     hmc_net = hmc_network_from_save_path(unique_hmc_save_path)
 
+# %%
+print(f"Acceptance ratio: {hmc_net.acceptance_ratio()}")
+print(
+    f"Mean and std of leapfrog steps taken: {hmc_net.leapfrog_steps_taken()[0]}, {hmc_net.leapfrog_steps_taken()[1]}"
+)
+
+# %%
+hmc_net.ess()
+
 
 # %%
 prediction = hmc_net.predict(x_plot, thinning=10)
@@ -124,4 +134,18 @@ plot_moment_matched_predictive_normal_distribution(
     y_ground_truth=y_ground_truth,
     y_lim=y_lim,
     # save_path=figure_dir.joinpath(f"hmc_x3_gap.pdf")
+)
+
+# %%
+n_predictions = 3
+gaussian_predictions = hmc_net.predict_list_of_gaussians(
+    x_plot, n_predictions=n_predictions
+)
+plot_distribution_samples(
+    x_plot=_x_plot,
+    distribution_samples=gaussian_predictions,
+    x_train=_x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
 )
