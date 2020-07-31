@@ -60,8 +60,6 @@ class PostHocLastLayerBayesianEnsemble:
     def predict_mixture(self, x_test):
         prediction_list = self.predict_list(x_test)
         cat_probs = tf.ones((x_test.shape + (self.n_networks,))) / self.n_networks
-        print(cat_probs.shape)
-        print(prediction_list[0])
         prediction = tfd.Mixture(
             cat=tfd.Categorical(probs=cat_probs), components=prediction_list
         )
@@ -134,7 +132,6 @@ class PostHocLastLayerBayesianNetwork:
         loc = np.expand_dims(loc, axis=loc.ndim)
         scale = scale.astype("float32")
         scale = np.expand_dims(scale, axis=scale.ndim)
-        print(scale.shape)
         return tfd.StudentT(df=df, loc=loc, scale=scale)
 
     def __call__(self, x_test):

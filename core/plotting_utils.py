@@ -345,7 +345,7 @@ def plot_weight_space_first_vs_last_layer(
     hist=True,
     bins=None,
     kde=False,
-    kde_bandwidth=1,
+    kde_bandwidth_factor=10,
     point_estimate_first=None,
     point_estimate_last=None,
     ensemble_point_estimates_first=None,
@@ -367,7 +367,7 @@ def plot_weight_space_first_vs_last_layer(
         bins=bins,
         hist=hist,
         kde=kde,
-        kde_bandwidth=kde_bandwidth,
+        kde_bandwidth_factor=kde_bandwidth_factor,
         point_estimate=point_estimate_first,
         ensemble_point_estimates=ensemble_point_estimates_first,
         distribution=distribution_first,
@@ -382,7 +382,7 @@ def plot_weight_space_first_vs_last_layer(
         bins=bins,
         hist=hist,
         kde=kde,
-        kde_bandwidth=kde_bandwidth,
+        kde_bandwidth_factor=kde_bandwidth_factor,
         point_estimate=point_estimate_last,
         ensemble_point_estimates=ensemble_point_estimates_last,
         distribution=distribution_last,
@@ -401,7 +401,7 @@ def plot_weight_space_histogram(
     hist=False,
     bins=None,
     kde=True,
-    kde_bandwidth=1,
+    kde_bandwidth_factor=0.1,
     point_estimate=None,
     ensemble_point_estimates=None,
     distribution=None,
@@ -415,6 +415,9 @@ def plot_weight_space_histogram(
     # factor_height_point_estimate = 1.0
     if fig is None and ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
+    # The KDE bandwidth should be wider, the wider the range is.
+    range = np.max(samples) - np.min(samples)
+    kde_bandwidth = kde_bandwidth_factor * range
     kde = KernelDensity(kernel="gaussian", bandwidth=kde_bandwidth).fit(
         samples[:, None]
     )
