@@ -1,8 +1,10 @@
+from collections import Iterable
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from core.map import MapNetwork
+from core.map import MapDensityNetwork, MapNetwork
 
 from .bayesian_linear_regression import BayesianLinearRegression
 
@@ -25,21 +27,23 @@ class PostHocLastLayerBayesianEnsemble:
         self.layer_units = layer_units
         self.layer_activations = layer_activations
         self.learning_rate = learning_rate
+        if not isinstance(seed, Iterable):
+            seed = [seed + (i / self.n_networks) for i in range(self.n_networks)]
         self.seed = seed
-        tf.random.set_seed(self.seed)
+        tf.random.set_seed(self.seed[0])
         self.networks = [
             PostHocLastLayerBayesianNetwork(
                 self.input_shape,
                 self.layer_units,
                 self.layer_activations,
                 learning_rate=self.learning_rate,
-                seed=self.seed + i,
+                seed=seed,
             )
-            for i in range(self.n_networks)
+            for seed in self.seed
         ]
 
     def fit(self, x_train, y_train, batch_size, epochs=120, verbose=1):
-        tf.random.set_seed(self.seed)
+        tf.random.set_seed(self.seed[0])
         for network in self.networks:
             network.fit(
                 x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
@@ -55,7 +59,9 @@ class PostHocLastLayerBayesianEnsemble:
 
     def predict_mixture(self, x_test):
         prediction_list = self.predict_list(x_test)
-        cat_probs = tf.ones((x_test.shape[0], self.n_networks)) / self.n_networks
+        cat_probs = tf.ones((x_test.shape + (self.n_networks,))) / self.n_networks
+        print(cat_probs.shape)
+        print(prediction_list[0])
         prediction = tfd.Mixture(
             cat=tfd.Categorical(probs=cat_probs), components=prediction_list
         )
@@ -107,6 +113,7 @@ class PostHocLastLayerBayesianNetwork:
             self.network.network.get_layer("feature_extractor").output,
         )
         features_train = self.feature_extractor(x_train).numpy()
+        features_train = np.hstack((features_train, np.ones((x_train.shape[0], 1))))
 
         # "fit" bayesian linear regression
         self.blr_model = BayesianLinearRegression(
@@ -120,10 +127,14 @@ class PostHocLastLayerBayesianNetwork:
 
     def predict(self, x_test):
         features_test = self.feature_extractor(x_test).numpy().astype("float32")
+        features_test = np.hstack((features_test, np.ones((x_test.shape[0], 1))))
         df, loc, scale = self.blr_model.predict(features_test)
         df = np.float32(df)
         loc = loc.astype("float32")
+        loc = np.expand_dims(loc, axis=loc.ndim)
         scale = scale.astype("float32")
+        scale = np.expand_dims(scale, axis=scale.ndim)
+        print(scale.shape)
         return tfd.StudentT(df=df, loc=loc, scale=scale)
 
     def __call__(self, x_test):
