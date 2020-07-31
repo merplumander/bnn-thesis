@@ -76,13 +76,13 @@ if rerun_training or not unique_hmc_save_path.is_file():
         layer_activations,
         weight_priors=weight_priors,
         bias_priors=bias_priors,
+        sampler=sampler,
         seed=0,
     )
 
     hmc_net.fit(
         x_train,
         y_train,
-        sampler=sampler,
         num_burnin_steps=num_burnin_steps,
         num_results=num_results,
         num_leapfrog_steps=num_leapfrog_steps,

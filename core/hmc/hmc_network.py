@@ -10,10 +10,18 @@ from ..map import MapNetwork
 from ..network_utils import (
     _linspace_network_indices,
     activation_strings_to_activation_functions,
+    backtransform_constrained_scale,
     build_scratch_model,
+    transform_unconstrained_scale,
 )
 
 tfd = tfp.distributions
+
+# def transform_unconstrained_scale(scale, factor=1):
+#     return scale
+#
+# def backtransform_constrained_scale(scale, factor=1):
+#     return scale
 
 
 class HMCNetwork:
@@ -22,9 +30,11 @@ class HMCNetwork:
         input_shape=[1],
         layer_units=[200, 100, 2],
         layer_activations=["relu", "relu", "linear"],
+        transform_unconstrained_scale_factor=0.05,
         weight_priors=[tfd.Normal(0, 0.2)] * 3,
         bias_priors=[tfd.Normal(0, 0.2)] * 3,
-        std_prior=tfd.Normal(2, 0.01),
+        std_prior=tfd.Normal(2, 0.01),  # currently does nothing
+        sampler="nuts",
         seed=0,
     ):
         """
@@ -45,9 +55,11 @@ class HMCNetwork:
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.weight_priors = weight_priors
         self.bias_priors = bias_priors
         self.std_prior = std_prior
+        self.sampler = sampler
         self.seed = seed
 
         self.initial_state = None
@@ -79,7 +91,11 @@ class HMCNetwork:
             verbose=verbose,
         )
         self.initial_state = net.get_weights()
-        self.initial_state.insert(0, net.sample_std)
+        self.initial_state.append(
+            backtransform_constrained_scale(
+                net.sample_std, factor=self.transform_unconstrained_scale_factor
+            ),
+        )
         return self.initial_state
 
     def log_prior(self, current_state):
@@ -100,8 +116,10 @@ class HMCNetwork:
 
     def _target_log_prob_fn_factory(self, x, y):
         def log_posterior(*current_state):
-            noise_std = current_state[0]
-            weights = current_state[1:]  # includes biases
+            noise_std = transform_unconstrained_scale(
+                current_state[-1], factor=self.transform_unconstrained_scale_factor
+            )
+            weights = current_state[0:-1]  # includes biases
             log_prob = self.log_prior(weights)
             log_prob += self.log_likelihood(weights, noise_std, x, y)
             return log_prob
@@ -130,7 +148,7 @@ class HMCNetwork:
             init_state.extend([tf.Variable(w), tf.Variable(b)])
         return init_state
 
-    @tf.function
+    @tf.function  # (experimental_compile=True)
     def _sample_chain(
         self,
         num_burnin_steps,
@@ -139,13 +157,20 @@ class HMCNetwork:
         previous_kernel_results,
         adaptive_kernel,
     ):
+        if self.sampler == "nuts":
+            trace_fn = lambda _, pkr: [
+                pkr.inner_results.is_accepted,
+                pkr.inner_results.leapfrogs_taken,
+            ]
+        else:
+            trace_fn = lambda _, pkr: [pkr.inner_results.is_accepted]
         chain, trace, final_kernel_results = tfp.mcmc.sample_chain(
             num_results=num_burnin_steps + num_results,
             current_state=current_state,
             previous_kernel_results=previous_kernel_results,
             kernel=adaptive_kernel,
             return_final_kernel_results=True,
-            trace_fn=lambda _, pkr: pkr.inner_results.is_accepted,
+            trace_fn=trace_fn,
         )
         return chain, trace, final_kernel_results
 
@@ -155,10 +180,9 @@ class HMCNetwork:
         y_train,
         initial_state=None,
         step_size_adapter="dual_averaging",
-        sampler="hmc",
         num_burnin_steps=1000,
         num_results=5000,
-        num_leapfrog_steps=5,
+        num_leapfrog_steps=25,
         step_size=0.1,
         resume=False,
         learning_rate=0.01,
@@ -166,7 +190,7 @@ class HMCNetwork:
         epochs=100,
         verbose=1,
     ):
-
+        self.num_leapfrog_steps = num_leapfrog_steps
         if self.initial_state is None and initial_state is None:
             initial_state = self._initial_state_through_map_estimation(
                 x_train,
@@ -186,7 +210,7 @@ class HMCNetwork:
             "simple": tfp.mcmc.SimpleStepSizeAdaptation,
             "dual_averaging": tfp.mcmc.DualAveragingStepSizeAdaptation,
         }[step_size_adapter]
-        if sampler == "nuts":
+        if self.sampler == "nuts":
             kernel = tfp.mcmc.NoUTurnSampler(target_log_prob_fn, step_size=step_size)
             adaptive_kernel = step_size_adapter(
                 kernel,
@@ -197,11 +221,11 @@ class HMCNetwork:
                 step_size_getter_fn=lambda pkr: pkr.step_size,
                 log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
-        elif sampler == "hmc":
+        elif self.sampler == "hmc":
             kernel = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn,
                 step_size=step_size,
-                num_leapfrog_steps=num_leapfrog_steps,
+                num_leapfrog_steps=self.num_leapfrog_steps,
             )
             adaptive_kernel = step_size_adapter(
                 kernel, num_adaptation_steps=int(num_burnin_steps * 0.8)
@@ -247,6 +271,21 @@ class HMCNetwork:
         """
         return tfp.mcmc.effective_sample_size(self.samples, **kwargs)
 
+    def acceptance_ratio(self):
+        return tf.reduce_sum(tf.cast(self.trace[0], tf.float32)) / len(self.trace[0])
+
+    def leapfrog_steps_taken(self):
+        """
+        Returns the mean and standard deviation of the leapfrog steps taken.
+        """
+        if self.sampler == "nuts":
+            return (
+                tf.reduce_mean(self.trace[1]),
+                tf.math.reduce_std(tf.cast(self.trace[1], tf.float32)),
+            )
+        else:
+            return self.num_leapfrog_steps, 0
+
     def predict_list_of_gaussians(self, x_test, thinning=1, n_predictions=None):
         """
         Produces a list of aleatoric Gaussian predictions from the sampled parameters
@@ -269,8 +308,10 @@ class HMCNetwork:
         predictive_distributions = []
         for i_sample in loop_over:
             params_list = [param[i_sample] for param in self.samples]
-            noise_std = params_list[0]
-            weights_list = params_list[1:]
+            noise_std = transform_unconstrained_scale(
+                params_list[-1], factor=self.transform_unconstrained_scale_factor
+            )
+            weights_list = params_list[:-1]
             model = build_scratch_model(
                 weights_list, noise_std, self.layer_activation_functions
             )
@@ -292,7 +333,9 @@ class HMCNetwork:
         gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
         dirac_deltas = []
         for gaussian in gaussians:
-            delta = tfd.Normal(gaussian.mean(), 1e-8)
+            delta = tfp.distributions.Deterministic(
+                loc=gaussian.mean()
+            )  # tfd.Normal(gaussian.mean(), 1e-8)
             dirac_deltas.append(delta)
         cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
         return self.predict_mixture_of_gaussians(cat_probs, dirac_deltas)
@@ -302,8 +345,10 @@ class HMCNetwork:
         predictive_distributions = []
         for i_sample in indices:
             params_list = [param[i_sample] for param in self.samples]
-            noise_std = params_list[0]
-            weights_list = params_list[1:]
+            noise_std = transform_unconstrained_scale(
+                params_list[-1], factor=self.transform_unconstrained_scale_factor
+            )
+            weights_list = params_list[:-1]
             model = build_scratch_model(
                 weights_list, noise_std, self.layer_activation_functions
             )
@@ -317,8 +362,10 @@ class HMCNetwork:
         sample_parameters is a list of tensors or arrays specifying the network
         parameters.
         """
-        noise_std = sample_parameters[0]
-        weights_list = sample_parameters[1:]
+        noise_std = transform_unconstrained_scale(
+            sample_parameters[-1], factor=self.transform_unconstrained_scale_factor
+        )
+        weights_list = sample_parameters[:-1]
         model = build_scratch_model(
             weights_list, noise_std, self.layer_activation_functions
         )

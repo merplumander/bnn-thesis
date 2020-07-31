@@ -24,6 +24,7 @@ class HMCDensityNetwork:
         layer_activations=["relu", "relu", "linear"],
         weight_priors=[tfd.Normal(0, 0.2)] * 3,
         bias_priors=[tfd.Normal(0, 0.2)] * 3,
+        sampler="nuts",
         seed=0,
     ):
         """
@@ -44,6 +45,7 @@ class HMCDensityNetwork:
         self.layer_activations = layer_activations
         self.weight_priors = weight_priors
         self.bias_priors = bias_priors
+        self.sampler = sampler
         self.seed = seed
 
         self.initial_state = None
@@ -132,13 +134,20 @@ class HMCDensityNetwork:
         previous_kernel_results,
         adaptive_kernel,
     ):
+        if self.sampler == "nuts":
+            trace_fn = lambda _, pkr: [
+                pkr.inner_results.is_accepted,
+                pkr.inner_results.leapfrogs_taken,
+            ]
+        else:
+            trace_fn = lambda _, pkr: [pkr.inner_results.is_accepted]
         chain, trace, final_kernel_results = tfp.mcmc.sample_chain(
             num_results=num_burnin_steps + num_results,
             current_state=current_state,
             previous_kernel_results=previous_kernel_results,
             kernel=adaptive_kernel,
             return_final_kernel_results=True,
-            trace_fn=lambda _, pkr: pkr.inner_results.is_accepted,
+            trace_fn=trace_fn,
         )
         return chain, trace, final_kernel_results
 
@@ -148,7 +157,6 @@ class HMCDensityNetwork:
         y_train,
         initial_state=None,
         step_size_adapter="dual_averaging",
-        sampler="hmc",
         num_burnin_steps=1000,
         num_results=5000,
         num_leapfrog_steps=5,
@@ -159,7 +167,7 @@ class HMCDensityNetwork:
         epochs=100,
         verbose=1,
     ):
-
+        self.num_leapfrog_steps = num_leapfrog_steps
         if self.initial_state is None and initial_state is None:
             initial_state = self._initial_state_through_map_estimation(
                 x_train,
@@ -180,7 +188,7 @@ class HMCDensityNetwork:
             "simple": tfp.mcmc.SimpleStepSizeAdaptation,
             "dual_averaging": tfp.mcmc.DualAveragingStepSizeAdaptation,
         }[step_size_adapter]
-        if sampler == "nuts":
+        if self.sampler == "nuts":
             kernel = tfp.mcmc.NoUTurnSampler(target_log_prob_fn, step_size=step_size)
             adaptive_kernel = step_size_adapter(
                 kernel,
@@ -191,11 +199,11 @@ class HMCDensityNetwork:
                 step_size_getter_fn=lambda pkr: pkr.step_size,
                 log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
-        elif sampler == "hmc":
+        elif self.sampler == "hmc":
             kernel = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn,
                 step_size=step_size,
-                num_leapfrog_steps=num_leapfrog_steps,
+                num_leapfrog_steps=self.num_leapfrog_steps,
             )
             adaptive_kernel = step_size_adapter(
                 kernel, num_adaptation_steps=int(num_burnin_steps * 0.8)
@@ -241,6 +249,21 @@ class HMCDensityNetwork:
         Estimate effective sample size of Markov chain(s).
         """
         return tfp.mcmc.effective_sample_size(self.samples, **kwargs)
+
+    def acceptance_ratio(self):
+        return tf.reduce_sum(tf.cast(self.trace[0], tf.float32)) / len(self.trace[0])
+
+    def leapfrog_steps_taken(self):
+        """
+        Returns the mean and standard deviation of the leapfrog steps taken.
+        """
+        if self.sampler == "nuts":
+            return (
+                tf.reduce_mean(self.trace[1]),
+                tf.math.reduce_std(tf.cast(self.trace[1], tf.float32)),
+            )
+        else:
+            return self.num_leapfrog_steps, 0
 
     def predict_list_of_gaussians(self, x_test, thinning=1, n_predictions=None):
         """
