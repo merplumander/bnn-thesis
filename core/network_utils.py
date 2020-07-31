@@ -26,30 +26,44 @@ def _linspace_network_indices(n_networks, n_predictions):
     return indices
 
 
-def regularization_lambda_to_prior_scale(regularization_lambda):
+def regularization_lambda_to_prior_scale(regularization_lambda, n_train):
     """
     Takes the regularization parameter lambda of L2 regularization and outputs the scale
     of the corresponding normal distribution.
     """
-    scale = np.sqrt(1 / (2 * regularization_lambda))
+    scale = np.sqrt(1 / (2 * regularization_lambda * n_train))  # * n_train
     return scale
 
 
-def prior_scale_to_regularization_lambda(prior_scale):
+def prior_scale_to_regularization_lambda(prior_scale, n_train):
     """
     Takes the scale of the prior normal distribution and outputs the corresponding L2
     regularization lambda.
     """
-    regularization_lambda = 1 / (2 * prior_scale ** 2)
+    regularization_lambda = (1 / (2 * prior_scale ** 2)) / n_train
     return regularization_lambda
 
 
-def transform_unconstrained_scale(unconstrained_scale, stability_addition=1e-6):
+def transform_unconstrained_scale(
+    unconstrained_scale, factor=0.05, stability_addition=1e-6
+):
     """
     Density networks output an unconstrained standard deviation (a.k.a. scale).
     This function transforms the unconstrained standard deviation to the actual value.
     """
-    return stability_addition + tf.math.softplus(0.05 * unconstrained_scale)
+    return stability_addition + tf.math.softplus(factor * unconstrained_scale)
+
+
+def backtransform_constrained_scale(
+    constrained_scale, factor=0.05, stability_addition=1e-6
+):
+    """
+    Backtransform the actual scale (i.e constrained scale) to the unconstrained space.
+    """
+    unconstrained = tfp.math.softplus_inverse(constrained_scale)
+    unconstrained /= factor
+    unconstrained -= stability_addition
+    return unconstrained
 
 
 def activation_strings_to_activation_functions(layer_activations):
@@ -125,6 +139,8 @@ def build_scratch_model(weights_list, noise_std, layer_activation_functions):
             weights_list[::2], weights_list[1::2], layer_activation_functions
         ):
             X = dense_layer(X, w, b, activation)
+        # print("output", X[..., :1].shape)
+        # print("noise", noise_std.shape)
         return tfd.Normal(loc=X[..., :1], scale=noise_std)
 
     return model

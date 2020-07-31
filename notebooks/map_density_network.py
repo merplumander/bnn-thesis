@@ -6,6 +6,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from core.map import MapDensityNetwork
+from core.network_utils import prior_scale_to_regularization_lambda
 from core.plotting_utils import (
     plot_distribution_samples,
     plot_ground_truth,
@@ -40,9 +41,14 @@ layer_units = [100, 50, 20, 10] + [2]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 # values behind the "#" seem to be reasonable for a prior distribution,
 # but in practice we need much lower values for training to succeed
-l2_weight_lambda = 0.00001  # 2
-l2_bias_lambda = 0.0000001  # 5
-
+# l2_weight_lambda = 0.00001  # 2
+# l2_bias_lambda = 0.0000001  # 5
+weight_prior_scale = 5
+bias_prior_scale = 5
+l2_weight_lambda = prior_scale_to_regularization_lambda(weight_prior_scale, n_train)
+l2_bias_lambda = prior_scale_to_regularization_lambda(bias_prior_scale, n_train)
+print(l2_weight_lambda)
+print(l2_bias_lambda)
 
 # %% codecell
 y_lim = [-5, 5]
@@ -53,9 +59,9 @@ ax.legend()
 
 
 # %%
-initial_learning_rate = 0.05
+initial_learning_rate = 0.1
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-    initial_learning_rate, decay_steps=20, decay_rate=0.9, staircase=True
+    initial_learning_rate, decay_steps=20, decay_rate=0.8, staircase=True
 )
 
 
@@ -96,3 +102,44 @@ plot_moment_matched_predictive_normal_distribution(
     y_ground_truth=y_ground_truth,
     y_lim=y_lim,
 )
+
+
+# %% markdown
+# You can also train wiht homoscedastic noise by passing a float for
+# initial_unconstrained_sigma .
+
+# %%
+initial_learning_rate = 0.05
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate, decay_steps=20, decay_rate=0.9, staircase=True
+)
+layer_units[-1] = 1
+net = MapDensityNetwork(
+    input_shape=input_shape,
+    layer_units=layer_units,
+    layer_activations=layer_activations,
+    initial_unconstrained_sigma=-10,  # it is usually beneficial to initialize this in the negative range.
+    # This way the initial noise variance will be small and the network will be encouraged to fit the data
+    # instead of explaining everything as noise.
+    transform_sigma_factor=0.2,
+    l2_weight_lambda=l2_weight_lambda,
+    l2_bias_lambda=l2_bias_lambda,
+    learning_rate=lr_schedule,
+)
+layer_units[-1] = 2
+
+# %% codecell
+net.fit(x_train=x_train, y_train=y_train, batch_size=batch_size, epochs=950, verbose=0)
+
+
+prediction = net.predict(x_plot)
+plot_moment_matched_predictive_normal_distribution(
+    x_plot=_x_plot,
+    predictive_distribution=prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
+)
+# %%
+net.network.layers[-2].sigma

@@ -3,7 +3,11 @@ from collections import Iterable
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from ..network_utils import _linspace_network_indices, build_keras_model
+from ..network_utils import (
+    _linspace_network_indices,
+    build_keras_model,
+    regularization_lambda_to_prior_scale,
+)
 
 tfd = tfp.distributions
 
@@ -130,6 +134,12 @@ class MapNetwork:
         l2_bias_lambda=None,
         names=None,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
+        loss="mean_squared_error",  # can also be tf.keras.losses object. This can be
+        # useful when you want to ensure that the model is exactly a maximum likelihood
+        # solution to a specified probabilistic model, since here the losses for each
+        # data point are usually added (as opposed to taking the mean). Using
+        # tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM)
+        # should give this behaviour.
         seed=0,
     ):
         self.input_shape = input_shape
@@ -151,9 +161,41 @@ class MapNetwork:
         )
 
         self.network.compile(
-            optimizer=tf.keras.optimizers.Adam(self.learning_rate),
-            loss="mean_squared_error",
+            optimizer=tf.keras.optimizers.Adam(self.learning_rate), loss=loss
         )
+
+    def negative_log_prior(self):
+        params = self.get_weights()
+        log_prob = 0
+        weight_priors, bias_priors = self._get_priors()
+        for w, b, w_prior, b_prior in zip(
+            params[::2], params[1::2], weight_priors, bias_priors
+        ):
+            log_prob += tf.reduce_sum(w_prior.log_prob(w))
+            log_prob += tf.reduce_sum(b_prior.log_prob(b))
+        return -log_prob
+
+    def _get_priors(self):
+        assert self.l2_weight_lambda is not None and self.l2_bias_lambda is not None
+        l2_weight_lambda = self.l2_weight_lambda
+        l2_bias_lambda = self.l2_bias_lambda
+        if not isinstance(l2_weight_lambda, Iterable):
+            l2_weight_lambda = [l2_weight_lambda] * len(self.layer_units)
+        if not isinstance(l2_bias_lambda, Iterable):
+            l2_bias_lambda = [l2_bias_lambda] * len(self.layer_units)
+        w_priors = []
+        b_priors = []
+        for w_lambda, b_lambda, u1, u2 in zip(
+            l2_weight_lambda,
+            l2_bias_lambda,
+            self.input_shape + self.layer_units[:-1],
+            self.layer_units,
+        ):
+            w_scale = regularization_lambda_to_prior_scale(w_lambda)
+            b_scale = regularization_lambda_to_prior_scale(b_lambda)
+            w_priors.append(tfd.Normal(0, tf.ones((u1, u2)) * w_scale))
+            b_priors.append(tfd.Normal(0, tf.ones(u2) * b_scale))
+        return w_priors, b_priors
 
     # @tf.function
     def fit(self, x_train, y_train, batch_size, epochs=120, verbose=1):

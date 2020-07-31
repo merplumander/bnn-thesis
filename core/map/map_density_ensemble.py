@@ -13,12 +13,45 @@ from ..network_utils import (
 tfd = tfp.distributions
 
 
+class AddSigmaLayer(tf.keras.layers.Layer):
+    """
+    Layer that passes its input through unchanged but enlarges the returned tensor in
+    the last dimension by adding a constant (but trainable) value. Say the input to the
+    layer was of shape (3, 1), i.e.:
+    [[0.5],
+     [0.7],
+     [0.1]]
+    This layer would return (before training) an output of shape (3, 2), in this case:
+    [[0.5, initial_value]
+     [0.7, initial_value]
+     [0.1, initial_value]]
+    This is useful to model homoscedastic noise variance explicitly.
+    """
+
+    def __init__(self, initial_value=0.0):
+        super(AddSigmaLayer, self).__init__()
+        self.sigma = tf.Variable(
+            [[initial_value]], name="sigma", dtype="float32", trainable=True
+        )
+
+    def call(self, input):
+        # Need the matmul workaround since the commented code below throws error when
+        #  tensorflow is generating the graph.
+        _ones = tf.ones_like(input)
+        sigmas = tf.matmul(_ones, self.sigma)
+        # sigmas = tf.repeat(self.sigma, input.shape[0])
+        # sigmas = tf.expand_dims(sigmas, axis=-1)
+        return tf.concat([input, sigmas], axis=-1)
+
+
 class MapDensityEnsemble:
     def __init__(
         self,
         n_networks=5,
         input_shape=[1],
         layer_units=[200, 100, 2],
+        initial_unconstrained_scales=None,  # None, float or Iterable
+        transform_unconstrained_scale_factor=0.05,
         l2_weight_lambda=None,
         l2_bias_lambda=None,
         layer_activations=["relu", "relu", "linear"],
@@ -38,6 +71,12 @@ class MapDensityEnsemble:
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.initial_unconstrained_scales = initial_unconstrained_scales
+        if not isinstance(initial_unconstrained_scales, Iterable):
+            self.initial_unconstrained_scales = [
+                initial_unconstrained_scales
+            ] * self.n_networks
+        self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
         self.learning_rate = learning_rate
@@ -55,13 +94,18 @@ class MapDensityEnsemble:
                 self.input_shape,
                 self.layer_units,
                 self.layer_activations,
+                initial_unconstrained_scale=initial_unconstrained_scale,
+                transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
                 learning_rate=self.learning_rate,
                 seed=seed,
             )
-            for l2_weight_lambda, l2_bias_lambda, seed in zip(
-                self.l2_weight_lambda, self.l2_bias_lambda, self.seed,
+            for initial_unconstrained_scale, l2_weight_lambda, l2_bias_lambda, seed in zip(
+                self.initial_unconstrained_scales,
+                self.l2_weight_lambda,
+                self.l2_bias_lambda,
+                self.seed,
             )
         ]
 
@@ -110,15 +154,22 @@ class MapDensityNetwork:
         input_shape=[1],
         layer_units=[200, 100, 2],
         layer_activations=["relu", "relu", "linear"],
+        initial_unconstrained_scale=None,  # unconstrained noise standard deviation. When None, the noise std is model by a second network output. When float, the noise std is homoscedastic.
+        transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
         names=None,
         seed=0,
     ):
+        if initial_unconstrained_scale is not None:
+            assert layer_units[-1] == 1
+        else:
+            assert layer_units[-1] == 2
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
         self.names = names
@@ -134,10 +185,16 @@ class MapDensityNetwork:
             l2_bias_lambda=self.l2_bias_lambda,
             names=self.names,
         )
+        if initial_unconstrained_scale is not None:
+            # print("homoscedastic noise")
+            self.network.add(AddSigmaLayer(initial_unconstrained_scale))
         self.network.add(
             tfp.layers.DistributionLambda(
                 lambda t: tfd.Normal(
-                    loc=t[..., :1], scale=transform_unconstrained_scale(t[..., 1:])
+                    loc=t[..., :1],
+                    scale=transform_unconstrained_scale(
+                        t[..., 1:], transform_unconstrained_scale_factor
+                    ),
                 )
             )
         )
@@ -208,7 +265,7 @@ class MapDensityNetwork:
         verbose=1,
     ):
         if n_train_data is None:
-            self.n_train_data = y_train.shape[0]
+            n_train_data = y_train.shape[0]
         if batch_size is None:
             batch_size = n_train_data
         tf.random.set_seed(self.seed)
@@ -216,6 +273,9 @@ class MapDensityNetwork:
             x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
         )
         return self
+
+    def evaluate(self, x, y, batch_size=None, verbose=0):
+        return self.network.evaluate(x, y, batch_size=batch_size, verbose=verbose)
 
     def predict(self, x_test):
         return self.network(x_test)

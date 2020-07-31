@@ -16,6 +16,9 @@ class StandardPreprocessor:
     def transform(self, x):
         return self.scaler.transform(x)
 
+    def fit_transform(self, x):
+        return self.scaler.fit_transform(x)
+
     def preprocess_create_x_train_x_plot(
         self, unprocessed_x_train, n_test=500, test_ds=0.5
     ):
