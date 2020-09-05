@@ -4,44 +4,15 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from ..network_utils import (
+    AddSigmaLayer,
     _linspace_network_indices,
     build_keras_model,
     regularization_lambda_to_prior_scale,
     transform_unconstrained_scale,
 )
+from ..preprocessing import StandardizePreprocessor
 
 tfd = tfp.distributions
-
-
-class AddSigmaLayer(tf.keras.layers.Layer):
-    """
-    Layer that passes its input through unchanged but enlarges the returned tensor in
-    the last dimension by adding a constant (but trainable) value. Say the input to the
-    layer was of shape (3, 1), i.e.:
-    [[0.5],
-     [0.7],
-     [0.1]]
-    This layer would return (before training) an output of shape (3, 2), in this case:
-    [[0.5, initial_value]
-     [0.7, initial_value]
-     [0.1, initial_value]]
-    This is useful to model homoscedastic noise variance explicitly.
-    """
-
-    def __init__(self, initial_value=0.0):
-        super(AddSigmaLayer, self).__init__()
-        self.sigma = tf.Variable(
-            [[initial_value]], name="sigma", dtype="float32", trainable=True
-        )
-
-    def call(self, input):
-        # Need the matmul workaround since the commented code below throws error when
-        #  tensorflow is generating the graph.
-        _ones = tf.ones_like(input)
-        sigmas = tf.matmul(_ones, self.sigma)
-        # sigmas = tf.repeat(self.sigma, input.shape[0])
-        # sigmas = tf.expand_dims(sigmas, axis=-1)
-        return tf.concat([input, sigmas], axis=-1)
 
 
 class MapDensityEnsemble:
@@ -50,12 +21,15 @@ class MapDensityEnsemble:
         n_networks=5,
         input_shape=[1],
         layer_units=[200, 100, 2],
-        initial_unconstrained_scales=None,  # None, float or Iterable
+        layer_activations=["relu", "relu", "linear"],
+        initial_unconstrained_scale=None,  # None, float or Iterable
         transform_unconstrained_scale_factor=0.05,
         l2_weight_lambda=None,
         l2_bias_lambda=None,
-        layer_activations=["relu", "relu", "linear"],
+        preprocess_x=False,
+        preprocess_y=False,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
+        names=None,
         seed=0,  # can be number or Iterable of numbers
     ):
         """
@@ -66,26 +40,28 @@ class MapDensityEnsemble:
         uncertainty is also represented in the different mean functions that are
         learned.
         """
-        assert layer_units[-1] == 2
         self.n_networks = n_networks
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
-        self.initial_unconstrained_scales = initial_unconstrained_scales
-        if not isinstance(initial_unconstrained_scales, Iterable):
-            self.initial_unconstrained_scales = [
-                initial_unconstrained_scales
+        self.initial_unconstrained_scale = initial_unconstrained_scale
+        if not isinstance(initial_unconstrained_scale, Iterable):
+            self.initial_unconstrained_scale = [
+                initial_unconstrained_scale
             ] * self.n_networks
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
+        self.preprocess_x = preprocess_x
+        self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
         if not isinstance(self.l2_weight_lambda, Iterable):
             self.l2_weight_lambda = [self.l2_weight_lambda] * self.n_networks
         if not isinstance(self.l2_bias_lambda, Iterable):
             self.l2_bias_lambda = [self.l2_bias_lambda] * self.n_networks
         if not isinstance(seed, Iterable):
-            seed = [seed + (i / self.n_networks) for i in range(self.n_networks)]
+            seed = [seed + (i / self.n_networks) * 1e3 for i in range(self.n_networks)]
+        self.names = names
         self.seed = seed
         tf.random.set_seed(self.seed[0])
 
@@ -98,26 +74,74 @@ class MapDensityEnsemble:
                 transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
+                preprocess_x=self.preprocess_x,
+                preprocess_y=self.preprocess_y,
                 learning_rate=self.learning_rate,
+                names=self.names,
                 seed=seed,
             )
             for initial_unconstrained_scale, l2_weight_lambda, l2_bias_lambda, seed in zip(
-                self.initial_unconstrained_scales,
+                self.initial_unconstrained_scale,
                 self.l2_weight_lambda,
                 self.l2_bias_lambda,
                 self.seed,
             )
         ]
 
-    def fit(self, x_train, y_train, batch_size, epochs=200, verbose=1):
+    def clone(self):
+        if isinstance(
+            self.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule
+        ):
+            print(
+                "Cloning will likely not work as desired. Check wether the learning rate schedule is reset."
+            )
+        return MapDensityEnsemble(
+            n_networks=self.n_networks,
+            input_shape=self.input_shape,
+            layer_units=self.layer_units,
+            layer_activations=self.layer_activations,
+            initial_unconstrained_scale=self.initial_unconstrained_scale,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+            l2_weight_lambda=self.l2_weight_lambda,
+            l2_bias_lambda=self.l2_bias_lambda,
+            preprocess_x=self.preprocess_x,
+            preprocess_y=self.preprocess_y,
+            learning_rate=self.learning_rate,
+            seed=self.seed,
+        )
+
+    def fit(
+        self,
+        x_train,
+        y_train,
+        batch_size,
+        epochs=200,
+        early_stop_callback=None,
+        validation_split=0.0,
+        validation_data=None,
+        verbose=1,
+    ):
         tf.random.set_seed(self.seed[0])
         if not isinstance(epochs, Iterable):
             epochs = [epochs] * self.n_networks
+        self.total_epochs = []
         for network, epoch in zip(self.networks, epochs):
             network.fit(
-                x_train, y_train, batch_size=batch_size, epochs=epoch, verbose=verbose
+                x_train,
+                y_train,
+                batch_size=batch_size,
+                epochs=epoch,
+                early_stop_callback=early_stop_callback,
+                validation_split=validation_split,
+                validation_data=validation_data,
+                verbose=verbose,
             )
+            self.total_epochs.append(network.total_epochs)
         return self
+
+    def rmse(self, x, y):
+        mean_prediction = self.predict(x).mean()
+        return tf.keras.metrics.RootMeanSquaredError()(mean_prediction, y)
 
     def predict_list_of_gaussians(self, x_test, n_predictions=None):
         if n_predictions is None:
@@ -131,8 +155,14 @@ class MapDensityEnsemble:
 
     def predict_mixture_of_gaussians(self, x_test):
         gaussians = self.predict_list_of_gaussians(x_test)
-        cat_probs = tf.ones(x_test.shape + (self.n_networks,)) / self.n_networks
+        cat_probs = tf.ones((x_test.shape[0],) + (1, self.n_networks)) / self.n_networks
         return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
+
+    def predict_moment_matched_gaussian(self, x_test):
+        predictive_mixture = self.predict_mixture_of_gaussians(x_test)
+        return tfd.Normal(
+            loc=predictive_mixture.mean(), scale=predictive_mixture.stddev()
+        )
 
     def predict(self, x_test):
         return self.predict_mixture_of_gaussians(x_test)
@@ -158,6 +188,8 @@ class MapDensityNetwork:
         transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
+        preprocess_x=False,
+        preprocess_y=False,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
         names=None,
         seed=0,
@@ -169,13 +201,19 @@ class MapDensityNetwork:
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
+        self.initial_unconstrained_scale = initial_unconstrained_scale
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
-        self.names = names
+        self.preprocess_x = preprocess_x
+        self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
+        self.names = names
         self.seed = seed
         tf.random.set_seed(self.seed)
+
+        if self.preprocess_y:
+            self.y_preprocessor = StandardizePreprocessor()
 
         self.network = build_keras_model(
             self.input_shape,
@@ -183,6 +221,7 @@ class MapDensityNetwork:
             self.layer_activations,
             l2_weight_lambda=self.l2_weight_lambda,
             l2_bias_lambda=self.l2_bias_lambda,
+            normalization_layer=self.preprocess_x,
             names=self.names,
         )
         if initial_unconstrained_scale is not None:
@@ -202,6 +241,28 @@ class MapDensityNetwork:
         self.network.compile(
             optimizer=tf.keras.optimizers.Adam(self.learning_rate),
             loss=MapDensityNetwork.negative_log_likelihood,
+        )
+
+    def clone(self):
+        if isinstance(
+            self.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule
+        ):
+            print(
+                "Cloning will likely not work as desired. Check wether the learning rate schedule is reset."
+            )
+        return MapDensityNetwork(
+            input_shape=self.input_shape,
+            layer_units=self.layer_units,
+            layer_activations=self.layer_activations,
+            initial_unconstrained_scale=self.initial_unconstrained_scale,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+            l2_weight_lambda=self.l2_weight_lambda,
+            l2_bias_lambda=self.l2_bias_lambda,
+            preprocess_x=self.preprocess_x,
+            preprocess_y=self.preprocess_y,
+            learning_rate=self.learning_rate,
+            names=self.names,
+            seed=self.seed,
         )
 
     def negative_log_prior(self):
@@ -255,30 +316,76 @@ class MapDensityNetwork:
             state.extend([w, b])
         return state
 
+    def fit_preprocessing(self, y_train):
+        if self.preprocess_y:
+            self.y_preprocessor.fit(y_train)
+
     def fit(
         self,
         x_train,
         y_train,
         n_train_data=None,
         batch_size=None,
-        epochs=120,
+        epochs=1,
+        early_stop_callback=None,
+        validation_split=0.0,
+        validation_data=None,
         verbose=1,
     ):
+        if self.preprocess_x:
+            self.network.get_layer("normalization").adapt(x_train, reset_state=True)
+        self.fit_preprocessing(y_train)
+        if self.preprocess_y:
+            y_train = self.y_preprocessor.transform(y_train)
+            if validation_data:
+                y_validation = self.y_preprocessor.transform(validation_data[1])
+                validation_data = (validation_data[0], y_validation)
         if n_train_data is None:
             n_train_data = y_train.shape[0]
         if batch_size is None:
             batch_size = n_train_data
+        callbacks = []
+        if early_stop_callback:
+            callbacks.append(early_stop_callback)
         tf.random.set_seed(self.seed)
-        self.network.fit(
-            x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose
+        history = self.network.fit(
+            x_train,
+            y_train,
+            batch_size=batch_size,
+            epochs=epochs,
+            callbacks=callbacks,
+            validation_split=validation_split,
+            validation_data=validation_data,
+            verbose=verbose,
         )
+        self.history = history
+        self.total_epochs = len(history.history["loss"])
+        # if restore_best_weights is True, then the number of total epochs needs to be
+        # adjusted by the patience
+        if early_stop_callback is not None:
+            if early_stop_callback.restore_best_weights:
+                self.total_epochs -= early_stop_callback.patience
         return self
 
     def evaluate(self, x, y, batch_size=None, verbose=0):
+        if self.preprocess_y:
+            y = self.y_preprocessor.transform(y)
         return self.network.evaluate(x, y, batch_size=batch_size, verbose=verbose)
 
-    def predict(self, x_test):
-        return self.network(x_test)
+    def rmse(self, x, y):
+        mean_prediction = self.predict(x).mean()
+        return tf.keras.metrics.RootMeanSquaredError()(mean_prediction, y)
+
+    def predict(self, x):
+        prediction = self.network(x)
+        if self.preprocess_y:
+            mean = prediction.mean()
+            std = prediction.stddev()
+            mean = self.y_preprocessor.inverse_transform(mean)
+            if self.y_preprocessor.std is not None:
+                std *= self.y_preprocessor.std
+            prediction = tfd.Normal(mean, std)
+        return prediction
 
     def predict_with_prior_samples(self, x_test, n_samples=5, seed=0):
         saved_weights = self.get_weights()
@@ -295,7 +402,10 @@ class MapDensityNetwork:
         return self.predict(x_test)
 
     def get_weights(self):
-        return self.network.get_weights()
+        weights = self.network.get_weights()
+        weights[-1] = weights[-1][0]
+        return weights
 
     def set_weights(self, weights_list):
+        weights_list[-1] = weights_list[-1].reshape(1, 1)
         self.network.set_weights(weights_list)

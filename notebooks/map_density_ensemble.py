@@ -72,10 +72,10 @@ ensemble = MapDensityEnsemble(
     layer_units=layer_units,
     layer_activations=layer_activations,
     learning_rate=lr_schedule,
+    seed=0,
 )
 
 
-# %% codecell
 ensemble.fit(
     x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=500, verbose=0
 )

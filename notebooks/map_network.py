@@ -22,7 +22,7 @@ tfd = tfp.distributions
 
 # %% codecell
 np.random.seed(0)
-n_train = 20
+n_train = 150
 batchsize_train = 20
 
 # train and test variables beginning with an underscore are unprocessed.
@@ -34,7 +34,7 @@ x_train, _x_plot, x_plot = preprocessor.preprocess_create_x_train_x_plot(
 y_ground_truth = ground_truth_periodic_function(_x_plot)
 
 
-layer_units = [50, 20] + [1]
+layer_units = [20, 20] + [1]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
 
@@ -47,7 +47,7 @@ ax.legend()
 
 
 # %%
-initial_learning_rate = 0.01
+initial_learning_rate = 0.05
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate, decay_steps=20, decay_rate=0.9, staircase=True
 )
@@ -64,7 +64,7 @@ net = MapNetwork(
 
 # %% codecell
 net.fit(
-    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=200, verbose=0
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=500, verbose=0
 )
 
 # %%

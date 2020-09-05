@@ -91,6 +91,10 @@ def create_split_periodic_data(
         sigma=sigma,
         seed=seed,
     ).astype(dtype)
+    # shuffle
+    random_indices = np.random.choice(x.shape[0], size=x.shape[0], replace=False)
+    x = x[random_indices]
+    y = y[random_indices]
     return x, y
 
 
@@ -125,6 +129,10 @@ def create_split_periodic_data_heteroscedastic(
         seed=seed,
     )
     y = np.concatenate((y_l, y_r)).reshape(-1, 1).astype(dtype)
+    # shuffle
+    random_indices = np.random.choice(x.shape[0], size=x.shape[0], replace=False)
+    x = x[random_indices]
+    y = y[random_indices]
     return x, y
 
 
@@ -148,6 +156,10 @@ def x3_gap_data(
     x = x.reshape(-1, 1).astype(dtype)
     y = ground_truth_x3_function(x)
     y = add_noise(y, sigma=sigma, seed=seed).astype(dtype)
+    # shuffle
+    random_indices = np.random.choice(x.shape[0], size=x.shape[0], replace=False)
+    x = x[random_indices]
+    y = y[random_indices]
     return x, y
 
 

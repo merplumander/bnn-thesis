@@ -7,6 +7,55 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 
+class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization):
+    """
+    tf.keras.layers.experimental.preprocessing.Normalization cannot deal with training
+    data where one feature is constant. It will assign a variance of 0, resulting in
+    NaNs being created when data is passed through the layer (since it divides the data
+    by 0 then). This is an adhoc fix to circumvent that problem.
+    """
+
+    def adapt(self, data, reset_state=True):
+        super(NormalizationFix, self).adapt(data, reset_state)
+        # akward tf way of saying self.variance[self.variance == 0] = 1
+        bmask = tf.equal(self.variance, 0.0)
+        imask = tf.where(
+            bmask, tf.ones_like(self.variance), tf.zeros_like(self.variance)
+        )
+        self.variance = self.variance + imask
+
+
+class AddSigmaLayer(tf.keras.layers.Layer):
+    """
+    Layer that passes its input through unchanged but enlarges the returned tensor in
+    the last dimension by adding a constant (but trainable) value. Say the input to the
+    layer was of shape (3, 1), i.e.:
+    [[0.5],
+     [0.7],
+     [0.1]]
+    This layer would return (before training) an output of shape (3, 2), in this case:
+    [[0.5, initial_value]
+     [0.7, initial_value]
+     [0.1, initial_value]]
+    This is useful to model homoscedastic noise variance explicitly.
+    """
+
+    def __init__(self, initial_value=0.0):
+        super().__init__()
+        self.sigma = tf.Variable(
+            [[initial_value]], name="sigma", dtype="float32", trainable=True
+        )
+
+    def call(self, input):
+        # Need the matmul workaround since the commented code below throws error when
+        #  tensorflow is generating the graph.
+        _ones = tf.ones_like(input)
+        sigmas = tf.matmul(_ones, self.sigma)
+        # sigmas = tf.repeat(self.sigma, input.shape[0])
+        # sigmas = tf.expand_dims(sigmas, axis=-1)
+        return tf.concat([input, sigmas], axis=-1)
+
+
 def _linspace_network_indices(n_networks, n_predictions):
     """
     Function to compute the indices of the networks or samples to use for prediction
@@ -17,9 +66,7 @@ def _linspace_network_indices(n_networks, n_predictions):
     """
     indices = tf.cast(
         tf.math.ceil(
-            tf.linspace(
-                0, tf.constant(n_networks - 1, dtype=tf.float32), n_predictions,
-            )
+            tf.linspace(0, tf.constant(n_networks - 1, dtype=tf.int32), n_predictions)
         ),
         tf.int32,
     )
@@ -152,6 +199,7 @@ def build_keras_model(
     layer_activations=["relu", "relu", "linear"],
     l2_weight_lambda=None,
     l2_bias_lambda=None,
+    normalization_layer=False,
     names=None,
 ):
     """Building an uncompiled keras tensorflow model with the architecture given"""
@@ -173,22 +221,12 @@ def build_keras_model(
             )
 
     model = tf.keras.Sequential()
-    model.add(
-        tf.keras.layers.Dense(
-            layer_units[0],
-            input_shape=input_shape,
-            activation=layer_activations[0],
-            name=names[0],
-            kernel_regularizer=kernel_regularizers[0],
-            bias_regularizer=bias_regularizers[0],
-        )
-    )
+    model.add(tf.keras.layers.InputLayer(input_shape=input_shape))
+    if normalization_layer:
+        model.add(NormalizationFix(input_shape=input_shape, name="normalization"))
+
     for units, activation, name, kernel_regularizer, bias_regularizer in zip(
-        layer_units[1:],
-        layer_activations[1:],
-        names[1:],
-        kernel_regularizers[1:],
-        bias_regularizers[1:],
+        layer_units, layer_activations, names, kernel_regularizers, bias_regularizers
     ):
         model.add(
             tf.keras.layers.Dense(
