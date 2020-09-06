@@ -553,3 +553,38 @@ def plot_weight_space_histogram(
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
+
+
+def plot_uci_single_benchmark(
+    model_results,
+    labels=None,
+    title=None,
+    ax_title=None,
+    y_label=None,
+    legend=True,
+    legend_kwargs={},
+    colors=None,
+    fig=None,
+    ax=None,
+    save_path=None,
+):
+    if colors is None:
+        colors = [None] * len(model_results)
+    means = [np.mean(result) for result in model_results]
+    std_errors = np.array([np.std(result) for result in model_results]) / np.sqrt(
+        len(model_results[0])
+    )
+    if fig is None:
+        fig, ax = plt.subplots()
+    fig.suptitle(title, fontsize=15)
+    ax.set_title(ax_title)
+    for i, mean, std_error, label, color in zip(
+        range(len(means)), means, std_errors, labels, colors
+    ):
+        ax.errorbar(i, mean, std_error, fmt="o", label=label, c=color)
+    ax.set_ylabel(y_label)
+    ax.tick_params(bottom=False, labelbottom=False)
+    if legend:
+        ax.legend(**legend_kwargs)
+    if save_path:
+        fig.savefig(save_path, bbox_inches="tight")
