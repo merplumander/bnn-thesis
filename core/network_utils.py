@@ -16,7 +16,7 @@ class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization)
     """
 
     def adapt(self, data, reset_state=True):
-        super(NormalizationFix, self).adapt(data, reset_state)
+        super().adapt(data, reset_state)
         # akward tf way of saying self.variance[self.variance == 0] = 1
         bmask = tf.equal(self.variance, 0.0)
         imask = tf.where(
