@@ -54,7 +54,7 @@ labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     rmses = [results[model]["RMSEs"] for model in models]
     y_label = None
@@ -74,7 +74,7 @@ for i, dataset in enumerate(datasets):
         ax=axes[i],
     )
 fig.tight_layout()
-save_path = figure_dir.joinpath(f"uci_{experiment_name}_rmses.pdf")
+save_path = figure_dir.joinpath(f"uci_gap_{experiment_name}_rmses.pdf")
 fig.savefig(save_path, bbox_inches="tight")
 
 
@@ -89,7 +89,7 @@ labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     nlls = [results[model]["NLLs"] for model in models[0:4]]
     nlls += [results[model]["MM-NLLs"] for model in models[4:]]
@@ -110,7 +110,7 @@ for i, dataset in enumerate(datasets):
         ax=axes[i],
     )
 fig.tight_layout()
-save_path = figure_dir.joinpath(f"uci_{experiment_name}_nlls.pdf")
+save_path = figure_dir.joinpath(f"uci_gap_{experiment_name}_nlls.pdf")
 fig.savefig(save_path, bbox_inches="tight")
 
 
@@ -127,7 +127,7 @@ labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     rmses = [results[model]["RMSEs"] for model in models]
     y_label = None
@@ -147,7 +147,7 @@ for i, dataset in enumerate(datasets):
         ax=axes[i],
     )
 fig.tight_layout()
-save_path = figure_dir.joinpath(f"uci_{experiment_name}_rmses.pdf")
+save_path = figure_dir.joinpath(f"uci_gap_{experiment_name}_rmses.pdf")
 fig.savefig(save_path, bbox_inches="tight")
 
 
@@ -163,7 +163,7 @@ labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     nlls = [results[model]["NLLs"] for model in models[0:4]]
     nlls += [results[model]["MM-NLLs"] for model in models[4:]]
@@ -184,16 +184,15 @@ for i, dataset in enumerate(datasets):
         ax=axes[i],
     )
 fig.tight_layout()
-save_path = figure_dir.joinpath(f"uci_{experiment_name}_nlls.pdf")
+save_path = figure_dir.joinpath(f"uci_gap_{experiment_name}_nlls.pdf")
 fig.savefig(save_path, bbox_inches="tight")
 
 
 # %% markdown
 # # Moment matched versus Mixture prediction
 
-# Cocnlusion: In terms of log likelihood it does not make a big difference whether to
-# use the predictive mixture distribution or the moment matched version
-# (ensemble size = 5). Perhaps the moment matched version is slightly superior.
+# Cocnlusion: Here in the UCI Gap case it is clearer, that the MM prediction is quite
+# superior to the mixture. It never hurts performance and sometimes helps a lot.
 
 # %%
 patience = 20
@@ -204,7 +203,7 @@ models = ["Ensemble", "LLB Ensemble"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     ensemble_mixture_nlls, llb_ensemble_mixture_nlls = [
         results[model]["NLLs"] for model in models
@@ -242,17 +241,19 @@ for i, dataset in enumerate(datasets):
         ax=axes[i],
     )
 fig.tight_layout()
-save_path = figure_dir.joinpath(f"uci_{experiment_name}_mm_vs_mixture.pdf")
+save_path = figure_dir.joinpath(f"uci_gap_{experiment_name}_mm_vs_mixture.pdf")
 fig.savefig(save_path, bbox_inches="tight")
+
 
 # %% markdown
 # # VI Standard Normal Prior Vs. Flat Prior
 
-# Conclusion: The difference between the VI models with different priors is small but
+# Conclusion: Also in the Gap case, the difference between the VI models with different
+# priors is small but
 # generally the model with the standard normal distribution as prior is slightly
-# superior (both in terms of RMSE and NLL). Also generally, the VI model is quite a lot
-# worse than the MAP model. Even in terms of NLL. Why is that? (Early Stopping with
-# patience 10 and 20).
+# superior. Here however, it shows the strngths of
+# epistmic uncertainty in that VI is often quite a bit better than MAP.
+# this was the other way around for the non_gap case.
 
 # %%
 patience = 20
@@ -262,7 +263,7 @@ labels = ["VI", "VI-Flat-Prior", "Map"]
 fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
 legend = False
 for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    experiment_path = Path(f"uci_gap_data/{dataset}/results/{experiment_name}.json")
     results = json.loads(experiment_path.read_text())
     nlls = [results[model]["NLLs"] for model in models]
     y_label = None
@@ -283,28 +284,6 @@ for i, dataset in enumerate(datasets):
     )
 fig.tight_layout()
 save_path = figure_dir.joinpath(
-    f"uci_{experiment_name}_vi_flat_vs_informative_prior.pdf"
+    f"uci_gap_{experiment_name}_vi_flat_vs_informative_prior.pdf"
 )
 fig.savefig(save_path, bbox_inches="tight")
-
-
-# %% markdown
-# # Training Times
-
-# Conclusion: Adding the Bayesian linear regression on top adds less than 1% of the MAP
-# training time on top. In fact it is more like 0.3%.
-
-# %%
-patience = 20
-experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
-models = ["Map", "Last Layer Bayesian"]
-for i, dataset in enumerate(datasets):
-    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
-    results = json.loads(experiment_path.read_text())
-    training_times = [results[model]["fit_times"] for model in models]
-    map_avg_time, llb_avg_additional_time = np.mean(training_times, axis=1)
-    # print(f"A MAP network trained for an average of {map_avg_time} seconds.")
-    # print(f"It took {llb_avg_additional_time} additional seconds to add the bayesian linear regression on top.")
-    print(
-        f"The training of the bayesian linear regression took {llb_avg_additional_time / map_avg_time} of the time of the training of the map network."
-    )

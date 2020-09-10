@@ -6,7 +6,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-import tensorflow as tf
 
 from core.plotting_utils import plot_uci_single_benchmark
 from core.uci_evaluation import uci_benchmark_save_plot
@@ -24,19 +23,17 @@ initial_unconstrained_scale = -1
 transform_unconstrained_scale_factor = 0.5
 learning_rate = 0.01
 
-epochs = int(1e5)
+epochs = 40
 batch_size = 100
 
-patience = 10
-early_stop_callback = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss", patience=patience, verbose=0, restore_best_weights=True
-)
-validation_split = 0.2
 
-experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
+# %%
+
+experiment_name = "epochs-40_one-hidden-layer"
 
 kwargs = {
     "experiment_name": experiment_name,
+    "use_gap_data": True,
     "figure_dir": figure_dir,
     "train_seed": train_seed,
     "ensemble_n_networks": ensemble_n_networks,
@@ -46,8 +43,6 @@ kwargs = {
     "learning_rate": learning_rate,
     "epochs": epochs,
     "batch_size": batch_size,
-    "early_stop_callback": early_stop_callback,
-    "validation_split": validation_split,
 }
 
 # %%

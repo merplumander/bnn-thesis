@@ -13,9 +13,7 @@ from core.last_layer import PostHocLastLayerBayesianNetwork as LLBNetwork
 from core.map import MapDensityEnsemble, MapDensityNetwork
 from core.plotting_utils import plot_uci_single_benchmark
 from core.variational import VariationalDensityNetwork
-from data.uci import (  # load_boston, load_concrete, load_energy, load_kin8nm
-    load_uci_data,
-)
+from data.uci import load_uci_data
 
 tfd = tfp.distributions
 
@@ -27,6 +25,7 @@ def calculate_rmse(mean_prediction, y):
 def evaluate_uci(
     model,
     dataset="boston",
+    use_gap_data=False,
     data_seed=0,
     train_seed=0,
     validation_size=0.0,
@@ -38,8 +37,9 @@ def evaluate_uci(
     # distribution.
 ):
     x, y, train_indices, validation_indices, test_indices = load_uci_data(
-        dataset, validation_size
+        dataset, validation_size, gap_data=use_gap_data
     )
+
     input_shape = [x.shape[1]]
     model_kwargs["input_shape"] = input_shape
     # x_train, x_test, y_train, y_test = train_test_split(
@@ -107,6 +107,7 @@ def evaluate_uci(
 def kfold_evaluate_uci(
     model_class,
     dataset="boston",
+    use_gap_data=False,
     train_seed=0,
     validation_split=0.0,
     model_kwargs={},
@@ -117,7 +118,7 @@ def kfold_evaluate_uci(
     # distribution.
 ):
     x, y, train_indices, validation_indices, test_indices = load_uci_data(
-        dataset, validation_split=validation_split
+        dataset, validation_split=validation_split, gap_data=use_gap_data
     )
     input_shape = [x.shape[1]]
     model_kwargs["input_shape"] = input_shape
@@ -203,6 +204,7 @@ def kfold_evaluate_uci(
 
 def benchmark_models_uci(
     dataset="boston",
+    use_gap_data=False,
     train_seed=0,
     layer_units=[50, 1],
     layer_activations=["relu", "linear"],
@@ -242,6 +244,7 @@ def benchmark_models_uci(
         vi_prior_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=VariationalDensityNetwork,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -264,6 +267,7 @@ def benchmark_models_uci(
         vi_flat_prior_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=VariationalDensityNetwork,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -286,6 +290,7 @@ def benchmark_models_uci(
         map_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=MapDensityNetwork,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -309,6 +314,7 @@ def benchmark_models_uci(
         llb_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=LLBNetwork,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -332,6 +338,7 @@ def benchmark_models_uci(
         ensemble_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=MapDensityEnsemble,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -360,6 +367,7 @@ def benchmark_models_uci(
         llb_ensemble_fit_times,
     ) = kfold_evaluate_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         model_class=LLBEnsemble,
         train_seed=train_seed,
         validation_split=validation_split,
@@ -376,7 +384,7 @@ def benchmark_models_uci(
     return results
 
 
-def save_results(experiment_name, dataset, results):
+def save_results(experiment_name, dataset, results, use_gap_data=False):
     """
     This function receives the experimental results. If already a json file exists to
     this experiment_name and dataset, it will read from that json file and compare the
@@ -384,7 +392,8 @@ def save_results(experiment_name, dataset, results):
     throw an AssertionError. Then it will save results of new keys into the same json
     file. If the file doesn't yet exist it will be created.
     """
-    dir = Path(f"uci_data/{dataset}/results/")
+    data_path = "uci_gap_data" if use_gap_data else "uci_data"
+    dir = Path(f"{data_path}/{dataset}/results/")
     dir.mkdir(parents=True, exist_ok=True)
     experiment_path = dir / f"{experiment_name}.json"
     if experiment_path.is_file():
@@ -393,7 +402,6 @@ def save_results(experiment_name, dataset, results):
             if method_key in results.keys():
                 for result_key in old_results[method_key].keys():
                     if result_key != "fit_times":
-
                         assert (
                             old_results[method_key][result_key]
                             == results[method_key][result_key]
@@ -409,6 +417,7 @@ def uci_benchmark_save_plot(
     experiment_name,
     dataset,
     figure_dir,
+    use_gap_data=False,
     train_seed=0,
     layer_units=[50, 1],
     layer_activations=["relu", "linear"],
@@ -424,6 +433,7 @@ def uci_benchmark_save_plot(
 ):
     results = benchmark_models_uci(
         dataset=dataset,
+        use_gap_data=use_gap_data,
         train_seed=train_seed,
         ensemble_n_networks=ensemble_n_networks,
         layer_units=layer_units,
@@ -438,7 +448,9 @@ def uci_benchmark_save_plot(
     )
 
     if save:
-        save_results(experiment_name, dataset, results)
+        save_results(
+            experiment_name, dataset, results, use_gap_data=use_gap_data,
+        )
 
     labels = [
         "VI-Prior",

@@ -27,7 +27,7 @@ learning_rate = 0.01
 epochs = int(1e5)
 batch_size = 100
 
-patience = 10
+patience = 20
 early_stop_callback = tf.keras.callbacks.EarlyStopping(
     monitor="val_loss", patience=patience, verbose=0, restore_best_weights=True
 )
@@ -37,6 +37,7 @@ experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
 
 kwargs = {
     "experiment_name": experiment_name,
+    "use_gap_data": True,
     "figure_dir": figure_dir,
     "train_seed": train_seed,
     "ensemble_n_networks": ensemble_n_networks,
@@ -49,6 +50,9 @@ kwargs = {
     "early_stop_callback": early_stop_callback,
     "validation_split": validation_split,
 }
+
+# %% markdown
+# # Evaluating the individual data sets
 
 # %%
 dataset = "boston"

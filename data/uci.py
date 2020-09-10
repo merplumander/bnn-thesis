@@ -6,7 +6,7 @@ from sklearn.datasets import load_boston as sklearn_load_boston
 from sklearn.model_selection import train_test_split
 
 
-def load_uci_data(dataset, validation_split=0.0):
+def _load_uci_dataset(dataset, validation_split=0.0):
     data = np.loadtxt(f"uci_data/{dataset}/data/data.txt")
     index_features = np.loadtxt(f"uci_data/{dataset}/data/index_features.txt").astype(
         np.int
@@ -34,14 +34,22 @@ def load_uci_data(dataset, validation_split=0.0):
         assert x.shape == (1599, 11)
     if dataset == "yacht":
         assert x.shape == (308, 6)
-    n_splits = np.loadtxt(f"uci_data/{dataset}/data/n_splits.txt").astype(np.int)
+    return x, y
+
+
+def load_uci_data(dataset, validation_split=0.0, gap_data=False):
+    x, y = _load_uci_dataset(dataset, validation_split)
+    data_path = "uci_gap_data" if gap_data else "uci_data"
+    train_split_path = "train_indices_" if gap_data else "index_train_"
+    test_split_path = "test_indices" if gap_data else "index_test_"
+    n_splits = np.loadtxt(f"{data_path}/{dataset}/data/n_splits.txt").astype(np.int)
     train_indices = []
     validation_indices = []
     test_indices = []
     for i in range(n_splits):
-        train = np.loadtxt(f"uci_data/{dataset}/data/index_train_{i}.txt").astype(
-            np.int
-        )
+        train = np.loadtxt(
+            f"{data_path}/{dataset}/data/{train_split_path}{i}.txt"
+        ).astype(np.int)
         if validation_split:
             train, validation = train_test_split(
                 train, test_size=validation_split, random_state=0
@@ -51,48 +59,9 @@ def load_uci_data(dataset, validation_split=0.0):
         else:
             validation_indices.append(np.array([], dtype=np.int))
         train_indices.append(train)
-        test = np.loadtxt(f"uci_data/{dataset}/data/index_test_{i}.txt").astype(np.int)
+        test = np.loadtxt(
+            f"{data_path}/{dataset}/data/{test_split_path}{i}.txt"
+        ).astype(np.int)
         test_indices.append(test)
         assert len(set(train).intersection(set(test))) == 0
     return x, y, train_indices, validation_indices, test_indices
-
-
-# def load_boston():
-#     x = sklearn_load_boston()["data"].astype(np.float32)
-#     y = sklearn_load_boston()["target"].astype(np.float32)
-#     assert x.shape == (506, 13)
-#     return x, y
-#
-#
-# def load_concrete():
-#     data = pd.read_excel("uci_data/Concrete_Data.xls")
-#     x = data.iloc[:, :-1].to_numpy().astype(np.float32)
-#     y = data.iloc[:, -1].to_numpy().reshape(-1, 1).astype(np.float32)
-#     assert x.shape == (1030, 8)
-#     return x, y
-#
-#
-# def load_energy():
-#     """
-#     This dataset has two output values. It is not clear which one to use or whether to
-#     use both. Gal 2015 seems to have used only the first output value
-#     (https://github.com/yaringal/DropoutUncertaintyExps) and claims that
-#     Hernandez-Lobato did the same.
-#     """
-#     df = pd.read_excel("uci_data/ENB2012_data.xlsx")
-#     x = df.iloc[:, :-2].to_numpy().astype(np.float32)
-#     y = df.iloc[:, -2].to_numpy().reshape(-1, 1).astype(np.float32)
-#     assert x.shape == (768, 8)
-#     assert y.shape == (768, 1)
-#     print(
-#         "Reminder: Check for this dataset (energy efficiency) whether to use one or two output variables"
-#     )
-#     return x, y
-#
-#
-# def load_kin8nm():
-#     df = pd.read_csv("uci_data/dataset_2175_kin8nm.csv")
-#     x = df.iloc[:, :-1].to_numpy().astype(np.float32)
-#     y = df.iloc[:, -1].to_numpy().reshape(-1, 1).astype(np.float32)
-#     assert x.shape == (8192, 8)
-#     return x, y

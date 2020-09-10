@@ -26,170 +26,64 @@ learning_rate = 0.01
 epochs = 40
 batch_size = 100
 
+
 # %%
 
 experiment_name = "epochs-40_one-hidden-layer"
 
+kwargs = {
+    "experiment_name": experiment_name,
+    "figure_dir": figure_dir,
+    "train_seed": train_seed,
+    "ensemble_n_networks": ensemble_n_networks,
+    "layer_activations": layer_activations,
+    "initial_unconstrained_scale": initial_unconstrained_scale,
+    "transform_unconstrained_scale_factor": transform_unconstrained_scale_factor,
+    "learning_rate": learning_rate,
+    "epochs": epochs,
+    "batch_size": batch_size,
+}
 
-# %% markdown
-# # Boston
 # %%
 dataset = "boston"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "concrete"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "energy"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "kin8nm"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "naval"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "power"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "protein"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=[100, 1],
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=[100, 1], **kwargs)
 
 
 # %%
 dataset = "wine"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
 
 
 # %%
 dataset = "yacht"
-uci_benchmark_save_plot(
-    experiment_name=experiment_name,
-    dataset=dataset,
-    figure_dir=figure_dir,
-    train_seed=train_seed,
-    ensemble_n_networks=ensemble_n_networks,
-    layer_units=layer_units,
-    layer_activations=layer_activations,
-    initial_unconstrained_scale=initial_unconstrained_scale,
-    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
-    learning_rate=learning_rate,
-    epochs=epochs,
-    batch_size=batch_size,
-)
+uci_benchmark_save_plot(dataset=dataset, layer_units=layer_units, **kwargs)
