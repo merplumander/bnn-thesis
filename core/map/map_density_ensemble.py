@@ -160,9 +160,14 @@ class MapDensityEnsemble:
 
     def predict_moment_matched_gaussian(self, x_test):
         predictive_mixture = self.predict_mixture_of_gaussians(x_test)
-        return tfd.Normal(
-            loc=predictive_mixture.mean(), scale=predictive_mixture.stddev()
-        )
+        std = predictive_mixture.stddev()
+        # When the std of the mixture is below ~0.0001 it just returns 0. (although much
+        # smaller numbers are representable by float32). I think that is due to the way
+        # the stddev is computed (seems unstable for such small numbers). When that
+        # happens, just put the stddev to 0.0001.
+        condition = tf.math.logical_or(std <= 0.0, tf.math.is_nan(std))
+        std = tf.where(condition, 0.0001, std)
+        return tfd.Normal(loc=predictive_mixture.mean(), scale=std)
 
     def predict(self, x_test):
         return self.predict_mixture_of_gaussians(x_test)
