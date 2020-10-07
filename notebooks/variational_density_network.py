@@ -63,6 +63,7 @@ variational_network = VariationalDensityNetwork(
     preprocess_x=True,
     preprocess_y=True,
     learning_rate=0.01,
+    evaluate_ignore_prior_loss=False,
     seed=0,
 )
 

@@ -72,6 +72,7 @@ def build_variational_keras_model(
     prior_scale_identity_multiplier=1,
     kl_weight=None,
     names=None,
+    evaluate_ignore_prior_loss=True,
 ):
     """
     Building an uncompiled keras tensorflow variational model with the architecture
@@ -88,7 +89,7 @@ def build_variational_keras_model(
     prior = prior_fn_factory(prior_scale_identity_multiplier)
 
     for i, units, activation, name in zip(
-        range(len(layer_units)), layer_units, layer_activations, names,
+        range(len(layer_units)), layer_units, layer_activations, names
     ):
         layer = tfp.layers.DenseVariational(
             units,
@@ -113,7 +114,10 @@ def build_variational_keras_model(
             ),
         )
     )(x)
-    model = ValidationModel(inputs=input, outputs=x)
+    if evaluate_ignore_prior_loss:
+        model = ValidationModel(inputs=input, outputs=x)
+    else:
+        model = tf.keras.Model(inputs=input, outputs=x)
     return model
 
 
@@ -131,6 +135,7 @@ class VariationalDensityNetwork:
         preprocess_y=False,
         learning_rate=0.1,
         names=None,
+        evaluate_ignore_prior_loss=True,
         seed=0,
     ):
         if initial_unconstrained_scale is not None:
@@ -182,6 +187,7 @@ class VariationalDensityNetwork:
             normalization_layer=self.preprocess_x,
             kl_weight=self.kl_weight,
             names=self.names,
+            evaluate_ignore_prior_loss=evaluate_ignore_prior_loss,
         )
 
         # if self.initial_unconstrained_scale is not None:
