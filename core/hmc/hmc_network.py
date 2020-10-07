@@ -1,6 +1,6 @@
 # with lots of inspiration from https://janosh.io/blog/hmc-bnn
-
 import pickle
+from collections import Iterable
 from pathlib import Path
 
 import tensorflow as tf
@@ -35,12 +35,14 @@ class HMCNetwork:
         bias_priors=[tfd.Normal(0, 0.2)] * 3,
         std_prior=tfd.Normal(2, 0.01),  # currently does nothing
         sampler="nuts",
+        n_chains=1,
         seed=0,
     ):
         """
-        A neural network whose posterior distribution parameters is estimated by HMC.
+        A neural network whose posterior distribution parameters are estimated by HMC.
         Each individual network sample models a function and a homoscedastic standard
         deviation is put around that function in the form of a Normal distribution.
+        The class can run several MCMC chains in parallel.
 
         Params:
             weight_priors (list of tfp distributions):
@@ -60,22 +62,44 @@ class HMCNetwork:
         self.bias_priors = bias_priors
         self.std_prior = std_prior
         self.sampler = sampler
+        self.n_chains = n_chains
+
         self.seed = seed
 
-        self.initial_state = None
+        self.burnin = []
+        self.samples = []
+        self.trace = []
+        self.final_kernel_results = []
 
-        self.burnin = None
-        self.samples = None
-        self.trace = None
-        self.final_kernel_results = None
+        self._combined_samples = None
 
         self.layer_activation_functions = activation_strings_to_activation_functions(
             self.layer_activations
         )
 
+    @property
+    def combined_samples(self):
+        if self.samples == []:
+            return []
+        else:
+            if self._combined_samples is None:
+                self._combined_samples = []
+                for i_param in range(len(self.samples[0])):
+                    self._combined_samples.append(
+                        tf.concat(
+                            [
+                                self.samples[i_chain][i_param]
+                                for i_chain in range(self.n_chains)
+                            ],
+                            axis=0,
+                        )
+                    )
+            return self._combined_samples
+
     def _initial_state_through_map_estimation(
         self, x_train, y_train, learning_rate, batch_size, epochs, verbose=1
     ):
+        print("_initial_state_through_map_estimation should use density network.")
         net = MapNetwork(
             input_shape=self.input_shape,
             layer_units=self.layer_units,
@@ -90,13 +114,13 @@ class HMCNetwork:
             epochs=epochs,
             verbose=verbose,
         )
-        self.initial_state = net.get_weights()
-        self.initial_state.append(
+        initial_state = net.get_weights()
+        initial_state.append(
             backtransform_constrained_scale(
                 net.sample_std, factor=self.transform_unconstrained_scale_factor
             ),
         )
-        return self.initial_state
+        return initial_state
 
     def log_prior(self, current_state):
         log_prob = 0
@@ -184,14 +208,14 @@ class HMCNetwork:
         num_results=5000,
         num_leapfrog_steps=25,
         step_size=0.1,
-        resume=False,
+        resume=False,  # resuming does not work
         learning_rate=0.01,
         batch_size=20,
         epochs=100,
         verbose=1,
     ):
         self.num_leapfrog_steps = num_leapfrog_steps
-        if self.initial_state is None and initial_state is None:
+        if initial_state is None:
             initial_state = self._initial_state_through_map_estimation(
                 x_train,
                 y_train,
@@ -200,7 +224,17 @@ class HMCNetwork:
                 epochs=epochs,
                 verbose=verbose,
             )
-        current_state = initial_state
+
+            initial_state = [initial_state] * self.n_chains
+
+        elif not all(
+            isinstance(elem, list) for elem in initial_state
+        ):  # In this case it's only one initial state
+            initial_state = [initial_state] * self.n_chains
+
+        # else: do nothing
+
+        current_states = initial_state
 
         target_log_prob_fn = self._target_log_prob_fn_factory(x_train, y_train)
 
@@ -231,58 +265,78 @@ class HMCNetwork:
                 kernel, num_adaptation_steps=int(num_burnin_steps * 0.8)
             )
 
-        if resume:
-            prev_chain, prev_trace, previous_kernel_results = (
-                nest_concat(self.burnin, self.samples),
-                self.trace,
-                self.final_kernel_results,
-            )
-            # step = len(prev_chain)
-            current_state = tf.nest.map_structure(lambda chain: chain[-1], prev_chain)
-        else:
-            previous_kernel_results = adaptive_kernel.bootstrap_results(current_state)
-            # step = 0
+        # if resume:
+        #     prev_chain, prev_trace, previous_kernel_results = (
+        #         nest_concat(self.burnin, self.samples),
+        #         self.trace,
+        #         self.final_kernel_results,
+        #     )
+        #     # step = len(prev_chain)
+        #     current_state = tf.nest.map_structure(lambda chain: chain[-1], prev_chain)
+        # else:
+        #     previous_kernel_results = adaptive_kernel.bootstrap_results(current_state)
+        # step = 0
         # Run the chain (with burn-in).
         # print("current state:", len(current_state), current_state)
         # print("previous_kernel_results:", len(previous_kernel_results), previous_kernel_results[0])
-        chain, trace, final_kernel_results = self._sample_chain(
-            num_burnin_steps=num_burnin_steps,
-            num_results=num_results,
-            current_state=current_state,
-            previous_kernel_results=previous_kernel_results,
-            adaptive_kernel=adaptive_kernel,
-        )
+        for i, current_state in enumerate(current_states):
+            previous_kernel_results = adaptive_kernel.bootstrap_results(current_state)
+            chain, trace, final_kernel_results = self._sample_chain(
+                num_burnin_steps=num_burnin_steps,
+                num_results=num_results,
+                current_state=current_state,
+                previous_kernel_results=previous_kernel_results,
+                adaptive_kernel=adaptive_kernel,
+            )
+            burnin, samples = zip(
+                *[(t[:-num_results], t[-num_results:]) for t in chain]
+            )
+            self.burnin.append(burnin)
+            self.samples.append(samples)
+            self.trace.append(trace)
+            self.final_kernel_results.append(final_kernel_results)
+        # resume currently doesn't work
+        # if resume:
+        #     chain = nest_concat(prev_chain, chain)
+        #     trace = nest_concat(prev_trace, trace)
+        # burnin, samples = zip(*[(t[:-num_results], t[-num_results:]) for t in chain])
 
-        if resume:
-            chain = nest_concat(prev_chain, chain)
-            trace = nest_concat(prev_trace, trace)
-        burnin, samples = zip(*[(t[:-num_results], t[-num_results:]) for t in chain])
-
-        # print("number of chains:", tf.size(target_log_prob_fn(*current_state)))
-        self.burnin = burnin
-        self.samples = samples
-        self.trace = trace
-        self.final_kernel_results = final_kernel_results
+        # self.burnin = burnin
+        # self.samples = samples
+        # self.trace = trace
+        # self.final_kernel_results = final_kernel_results
         return self
 
     def ess(self, **kwargs):
         """
         Estimate effective sample size of Markov chain(s).
         """
-        return tfp.mcmc.effective_sample_size(self.samples, **kwargs)
+        esss = []
+        for i in range(self.n_chains):
+            esss.append(tfp.mcmc.effective_sample_size(self.samples[i], **kwargs))
+        return esss
 
     def acceptance_ratio(self):
-        return tf.reduce_sum(tf.cast(self.trace[0], tf.float32)) / len(self.trace[0])
+        acceptance_ratios = []
+        for i in range(self.n_chains):
+            acceptance_ratios.append(
+                tf.reduce_sum(tf.cast(self.trace[i][0], tf.float32))
+                / len(self.trace[i][0])
+            )
+        return tf.convert_to_tensor(acceptance_ratios)
 
     def leapfrog_steps_taken(self):
         """
-        Returns the mean and standard deviation of the leapfrog steps taken.
+        Returns the means and standard deviations of the leapfrog steps taken of the
+        individual chains.
         """
         if self.sampler == "nuts":
-            return (
-                tf.reduce_mean(self.trace[1]),
-                tf.math.reduce_std(tf.cast(self.trace[1], tf.float32)),
-            )
+            means = []
+            stds = []
+            for i in range(self.n_chains):
+                means.append(tf.reduce_mean(self.trace[i][1]))
+                stds.append(tf.math.reduce_std(tf.cast(self.trace[i][1], tf.float32)))
+            return tf.convert_to_tensor(means), tf.convert_to_tensor(stds)
         else:
             return self.num_leapfrog_steps, 0
 
@@ -297,7 +351,7 @@ class HMCNetwork:
                                  If n_predictions is specified, thinning will be
                                  ignored.
         """
-        n_samples = len(self.samples[0])
+        n_samples = len(self.combined_samples[0])
         if n_predictions is None:
             loop_over = tf.range(0, n_samples, thinning)
         else:
@@ -307,7 +361,7 @@ class HMCNetwork:
         # this list
         predictive_distributions = []
         for i_sample in loop_over:
-            params_list = [param[i_sample] for param in self.samples]
+            params_list = [param[i_sample] for param in self.combined_samples]
             noise_std = transform_unconstrained_scale(
                 params_list[-1], factor=self.transform_unconstrained_scale_factor
             )

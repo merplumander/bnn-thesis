@@ -41,7 +41,7 @@ x_train, _x_plot, x_plot = preprocessor.preprocess_create_x_train_x_plot(
 )
 y_ground_truth = ground_truth_x3_function(_x_plot)
 
-layer_units = [50, 20] + [1]
+layer_units = [3] + [1]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
 
@@ -74,10 +74,11 @@ rerun_training = True
 
 # %%
 sampler = "hmc"
-num_burnin_steps = 500
-num_results = 1000
-num_leapfrog_steps = 25
+num_burnin_steps = 300
+num_results = 1500
+num_leapfrog_steps = 50
 step_size = 0.1
+n_chains = 2
 
 unique_hmc_save_path = f"deletable-hmc_n-units-{layer_units}_activations-{layer_activations}_prior-scale-{prior_scale}_sampler-{sampler}_data-x3-gap_unconstrained-scale"
 unique_hmc_save_path = save_dir.joinpath(unique_hmc_save_path)
@@ -94,7 +95,8 @@ if rerun_training or not unique_hmc_save_path.is_file():
         bias_priors=bias_priors,
         std_prior=tfd.Normal(0.3, 0.01),
         sampler=sampler,
-        seed=0,
+        n_chains=n_chains,
+        seed=1,
     )
 
     hmc_net.fit(
@@ -114,11 +116,13 @@ if rerun_training or not unique_hmc_save_path.is_file():
 else:
     hmc_net = hmc_network_from_save_path(unique_hmc_save_path)
 
+
 # %%
-print(f"Acceptance ratio: {hmc_net.acceptance_ratio()}")
+print(f"Acceptance ratios: {hmc_net.acceptance_ratio()}")
 print(
-    f"Mean and std of leapfrog steps taken: {hmc_net.leapfrog_steps_taken()[0]}, {hmc_net.leapfrog_steps_taken()[1]}"
+    f"Means and stds of leapfrog steps taken: {hmc_net.leapfrog_steps_taken()[0]}, {hmc_net.leapfrog_steps_taken()[1]}"
 )
+
 
 # %%
 hmc_net.ess()
