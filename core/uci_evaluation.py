@@ -577,3 +577,219 @@ def uci_benchmark_save_plot(
         title=title,
         y_label=y_label,
     )
+
+
+def generate_member_indices(n_networks, size, n_comb_max=100, seed=0):
+    random.seed(seed)
+    if scp.special.comb(n_networks, size, exact=True) < n_comb_max * 10:
+        combs = list(itertools.combinations(np.arange(n_networks), r=size))
+        random.shuffle(combs)
+        combs = combs[0:n_comb_max]
+    else:
+        combs = set()
+        while len(combs) < n_comb_max:
+            combs.add(tuple(sorted(random.sample(range(n_networks), size))))
+        combs = list(combs)
+    return combs
+
+
+def evaluate_ensemble_size(model, x_test, y_test, size=1, n_comb_max=100, seed=0):
+    nets = model.networks
+    n_networks = len(nets)
+    combs = generate_member_indices(n_networks, size, n_comb_max=n_comb_max, seed=seed)
+    rmses, nlls, mm_nlls = [], [], []
+    for comb in combs:
+        model.networks = [nets[i] for i in comb]
+        model.predict(x_test)
+        predictive_distribution = model.predict(x_test)
+        rmse = (
+            calculate_rmse(predictive_distribution.mean(), y_test)
+            .numpy()
+            .astype(np.float)
+        )
+        negative_log_likelihood = (
+            -tf.reduce_mean(predictive_distribution.log_prob(y_test))
+            .numpy()
+            .astype(np.float)
+        )
+        mm_predictive_distribution = model.predict_moment_matched_gaussian(x_test)
+        # rmse_mm = calculate_rmse(mm_predictive_distribution.mean(), y_test)
+        # assert rmse_mm == rmse
+        mm_negative_log_likelihood = (
+            -tf.reduce_mean(mm_predictive_distribution.log_prob(y_test))
+            .numpy()
+            .astype(np.float)
+        )
+        rmses.append(rmse)
+        nlls.append(negative_log_likelihood)
+        mm_nlls.append(mm_negative_log_likelihood)
+    # undo side effects
+    model.networks = nets
+    return rmses, nlls, mm_nlls
+
+
+def uci_benchmark_ensemble_sizes_save_plot(
+    experiment_name,
+    model_save_dir=None,
+    dataset="boston",
+    use_gap_data=False,
+    train_seed=0,
+    layer_units=[50, 1],
+    layer_activations=["relu", "linear"],
+    initial_unconstrained_scale=-1,
+    transform_unconstrained_scale_factor=0.5,
+    learning_rate=0.01,
+    epochs=40,
+    batch_size=100,
+    n_networks=5,
+    early_stop_callback=None,
+    weight_prior_scale=None,
+    bias_prior_scale=None,
+    last_layer_prior="non-informative",
+    last_layer_prior_params=None,
+    validation_split=0.0,
+    n_comb_max=100,
+    save=True,  # wether to save the results dict
+):
+
+    results = {}
+    fit_kwargs = {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "early_stop_callback": early_stop_callback,
+    }
+    layer_names = [None] * (len(layer_units) - 2) + ["feature_extractor", "output"]
+    model_kwargs = {
+        "layer_units": layer_units,
+        "layer_activations": layer_activations,
+        "initial_unconstrained_scale": initial_unconstrained_scale,
+        "transform_unconstrained_scale_factor": transform_unconstrained_scale_factor,
+        "preprocess_x": True,
+        "preprocess_y": True,
+        "learning_rate": learning_rate,
+        "names": layer_names,
+        "n_networks": n_networks,
+    }
+    if model_save_dir is not None:
+        model_save_dir = Path(model_save_dir)
+        model_save_dir.mkdir(parents=True, exist_ok=True)
+        ensemble_save_path = model_save_dir.joinpath(
+            f"uci_benchmark_ensemble_sizes_{experiment_name}_{dataset}_gap-{use_gap_data}/ensemble"
+        )
+        if ensemble_save_path.is_dir():
+            print("Loading ensemble from disk")
+            ensemble_models = load_models(
+                ensemble_save_path,
+                load_model_function=map_density_ensemble_from_save_path,
+            )
+        else:
+            (_, _, ensemble_models, _, _) = kfold_evaluate_uci(
+                dataset=dataset,
+                use_gap_data=use_gap_data,
+                model_class=MapDensityEnsemble,
+                train_seed=train_seed,
+                validation_split=validation_split,
+                weight_prior_scale=weight_prior_scale,
+                bias_prior_scale=bias_prior_scale,
+                model_kwargs=model_kwargs,
+                fit_kwargs=fit_kwargs,
+            )
+            save_models(ensemble_save_path, ensemble_models)
+    else:
+        (_, _, ensemble_models, _, _) = kfold_evaluate_uci(
+            dataset=dataset,
+            use_gap_data=use_gap_data,
+            model_class=MapDensityEnsemble,
+            train_seed=train_seed,
+            validation_split=validation_split,
+            weight_prior_scale=weight_prior_scale,
+            bias_prior_scale=bias_prior_scale,
+            model_kwargs=model_kwargs,
+            fit_kwargs=fit_kwargs,
+        )
+
+    print("Done Ensemble Training.")
+    x, y, train_indices, validation_indices, test_indices = load_uci_data(
+        dataset, validation_split=validation_split, gap_data=use_gap_data
+    )
+    results = {}
+    rmses, nlls, mm_nlls = [], [], []
+    for size in np.arange(n_networks) + 1:
+        size_rmses, size_nlls, size_mm_nlls = [], [], []
+        for split, model in enumerate(ensemble_models):
+            x_test = x[test_indices[split]]
+            y_test = y[test_indices[split]].reshape(-1, 1)
+            rmse, nll, mm_nll = evaluate_ensemble_size(
+                model, x_test, y_test, size=size, n_comb_max=n_comb_max, seed=0
+            )
+            size_rmses.append(rmse)
+            size_nlls.append(nll)
+            size_mm_nlls.append(mm_nll)
+        rmses.append(size_rmses)
+        nlls.append(size_nlls)
+        mm_nlls.append(size_mm_nlls)
+    results["Ensemble"] = {"RMSEs": rmses, "NLLs": nlls, "MM-NLLs": mm_nlls}
+    print("Done Ensemble Testing.")
+
+    model_kwargs.pop("names")
+    model_kwargs["last_layer_prior"] = last_layer_prior
+    model_kwargs["last_layer_prior_params"] = last_layer_prior_params
+    llb_ensemble_fit_kwargs_list = [
+        {"pretrained_networks": model.networks} for model in ensemble_models
+    ]
+    _, _, llb_ensemble_models, _, _ = kfold_evaluate_uci(
+        dataset=dataset,
+        use_gap_data=use_gap_data,
+        model_class=LLBEnsemble,
+        train_seed=train_seed,
+        validation_split=validation_split,
+        model_kwargs=model_kwargs,
+        fit_kwargs_list=llb_ensemble_fit_kwargs_list,
+    )
+    print("Done LLB Ensemble Training.")
+
+    rmses, nlls, mm_nlls = [], [], []
+    for size in np.arange(n_networks) + 1:
+        size_rmses, size_nlls, size_mm_nlls = [], [], []
+        for split, model in enumerate(llb_ensemble_models):
+            x_test = x[test_indices[split]]
+            y_test = y[test_indices[split]].reshape(-1, 1)
+            rmse, nll, mm_nll = evaluate_ensemble_size(
+                model, x_test, y_test, size=size, n_comb_max=n_comb_max, seed=0
+            )
+            size_rmses.append(rmse)
+            size_nlls.append(nll)
+            size_mm_nlls.append(mm_nll)
+        rmses.append(size_rmses)
+        nlls.append(size_nlls)
+        mm_nlls.append(size_mm_nlls)
+    results["LLB Ensemble"] = {"RMSEs": rmses, "NLLs": nlls, "MM-NLLs": mm_nlls}
+
+    if save:
+        save_results(
+            experiment_name,
+            dataset,
+            results,
+            use_gap_data=use_gap_data,
+            sub_folder="ensemble_sizes",
+        )
+
+    # e_rmses = results["Ensemble"]["RMSEs"]
+    e_nlls = results["Ensemble"]["NLLs"]
+    e_mm_nlls = results["Ensemble"]["MM-NLLs"]
+    # llbe_rmses = results["LLB Ensemble"]["RMSEs"]
+    llbe_nlls = results["LLB Ensemble"]["NLLs"]
+    llbe_mm_nlls = results["LLB Ensemble"]["MM-NLLs"]
+    labels = ["Ensemble MM", "Ensemble", "LLB Ensemble MM", "LLB Ensemble"]
+    colors = sns.color_palette()
+    with open("config/uci-color-config.yaml") as f:
+        color_mapping = yaml.full_load(f)
+    plot_uci_ensemble_size_benchmark(
+        [e_mm_nlls, e_nlls, llbe_mm_nlls, llbe_nlls],
+        labels=labels,
+        title=dataset,
+        x_label="# ensemble_memebers",
+        y_label="Negative Log Likelihood",
+        colors=[colors[color_mapping[method]] for method in labels],
+    )
+    return results

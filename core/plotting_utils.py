@@ -1,3 +1,4 @@
+import awkward1 as ak
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -523,9 +524,7 @@ def plot_weight_space_histogram(
         # highest_kde = np.max(kde_sample_density)
         # mixture = mixture * highest_kde / highest_mixture
         twin_ax = ax.twinx()
-        twin_ax.plot(
-            x_plot, mixture, c=c, alpha=1, label="Last-Layer Distribution",
-        )
+        twin_ax.plot(x_plot, mixture, c=c, alpha=1, label="Last-Layer Distribution")
         _lines, _labels = twin_ax.get_legend_handles_labels()
         lines += _lines
         labels += _labels
@@ -586,5 +585,50 @@ def plot_uci_single_benchmark(
     ax.tick_params(bottom=False, labelbottom=False)
     if legend:
         ax.legend(**legend_kwargs)
+    if save_path:
+        fig.savefig(save_path, bbox_inches="tight")
+
+
+def plot_uci_ensemble_size_benchmark(
+    model_results,
+    labels=None,
+    title=None,
+    x_label=None,
+    y_label=None,
+    x_lim=None,
+    colors=None,
+    fig=None,
+    ax=None,
+    save_path=None,
+):
+    if colors is None:
+        colors = [None] * len(model_results)
+
+    if fig is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    fig.suptitle(title, fontsize=15)
+
+    for i, results, label, color in zip(
+        range(len(model_results)), model_results, labels, colors
+    ):
+        results = ak.Array(results)
+        size_split_means = np.mean(results, axis=2)
+        size_means = np.array(np.mean(size_split_means, axis=1))
+        size_split_stds = np.std(results, axis=2)
+        size_stds = np.array(np.mean(size_split_stds, axis=1))
+        print(size_means)
+        ax.errorbar(
+            np.arange(len(results)) + 1 + 0.15 * i,
+            size_means,
+            size_stds,
+            c=color,
+            fmt="o",
+            label=label,
+        )
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_xlim(x_lim)
+    ax.legend()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")

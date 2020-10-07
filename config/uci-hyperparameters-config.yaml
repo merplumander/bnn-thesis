@@ -1,0 +1,10 @@
+
+train_seed: 0
+n_networks: 5
+layer_units: [50, 1]
+layer_activations: ["relu", "linear"]
+initial_unconstrained_scale: -1
+transform_unconstrained_scale_factor: 0.5
+learning_rate: 0.01
+epochs: 100000
+batch_size: 100
