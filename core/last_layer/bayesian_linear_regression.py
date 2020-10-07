@@ -62,6 +62,7 @@ class BayesianLinearRegression:
     def sample_sigma(self, seed=0):
         np.random.seed(seed)
         ig = stats.invgamma(a=self.a_n, scale=self.b_n)
+        # print("mean sigma", np.sqrt(ig.mean()))
         sigma_sq = ig.rvs()
         return np.sqrt(sigma_sq)
 

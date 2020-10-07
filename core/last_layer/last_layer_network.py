@@ -26,17 +26,19 @@ class PostHocLastLayerBayesianEnsemble:
         preprocess_x=False,
         preprocess_y=False,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
+        last_layer_prior="non-informative",
+        last_layer_prior_params=None,
         seed=0,
     ):
 
-        self.n_networks = n_networks
+        self._n_networks = n_networks
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
         if not isinstance(initial_unconstrained_scale, Iterable):
             self.initial_unconstrained_scale = [
                 initial_unconstrained_scale
-            ] * self.n_networks
+            ] * self._n_networks
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -44,7 +46,9 @@ class PostHocLastLayerBayesianEnsemble:
         self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
         if not isinstance(seed, Iterable):
-            seed = [seed + (i / self.n_networks) for i in range(self.n_networks)]
+            seed = [seed + (i / self._n_networks) for i in range(self._n_networks)]
+        self.last_layer_prior = last_layer_prior
+        self.last_layer_prior_params = last_layer_prior_params
         self.seed = seed
         tf.random.set_seed(self.seed[0])
         self.networks = [
@@ -59,12 +63,18 @@ class PostHocLastLayerBayesianEnsemble:
                 preprocess_x=self.preprocess_x,
                 preprocess_y=self.preprocess_y,
                 learning_rate=self.learning_rate,
+                last_layer_prior=self.last_layer_prior,
+                last_layer_prior_params=self.last_layer_prior_params,
                 seed=seed,
             )
             for seed, initial_unconstrained_scale in zip(
                 self.seed, self.initial_unconstrained_scale
             )
         ]
+
+    @property
+    def n_networks(self):
+        return len(self.networks)
 
     @property
     def total_epochs(self):
@@ -152,6 +162,8 @@ class PostHocLastLayerBayesianNetwork:
         preprocess_x=False,
         preprocess_y=False,
         learning_rate=0.01,  # can be float or an instance of tf.keras.optimizers.schedules
+        last_layer_prior="non-informative",
+        last_layer_prior_params=None,
         seed=0,
     ):
         self.input_shape = input_shape
@@ -164,6 +176,8 @@ class PostHocLastLayerBayesianNetwork:
         self.preprocess_x = preprocess_x
         self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
+        self.last_layer_prior = last_layer_prior
+        self.last_layer_prior_params = last_layer_prior_params
         self.seed = seed
 
         if self.preprocess_y:
@@ -241,14 +255,33 @@ class PostHocLastLayerBayesianNetwork:
         )
         features_train = self.feature_extractor(x_train).numpy()
         features_train = np.hstack((features_train, np.ones((x_train.shape[0], 1))))
+        ml_noise_sigma = self.network.noise_sigma
+
         # "fit" bayesian linear regression
         n_features = features_train.shape[1]
-        self.blr_model = BayesianLinearRegression(
-            mu_0=np.zeros((n_features, 1)),  # np.zeros(n_features),
-            V_0=1e3 * np.eye(n_features),  #
-            a_0=-n_features / 2,
-            b_0=0,
-        )
+        if self.last_layer_prior_params is None:
+            if self.last_layer_prior == "non-informative":
+                self.last_layer_prior_params = {
+                    "mu_0": np.zeros((n_features, 1)),
+                    "V_0": 1e3 * np.eye(n_features),
+                    "a_0": -n_features / 2,
+                    "b_0": 0,
+                }
+            elif (
+                self.last_layer_prior == "standard-normal-weights-non-informative-scale"
+            ):
+                self.last_layer_prior_params = {
+                    "mu_0": np.zeros((n_features, 1)),
+                    "V_0": (1 / ml_noise_sigma ** 2) * np.eye(n_features),
+                    "a_0": -n_features / 2,
+                    "b_0": 0,
+                }
+            else:
+                raise ValueError(
+                    f'When not specifying last_layer_prior_params, you can pass either "non-informative" or "standard-normal-weights-non-informative-scale" as last_layer_prior. You instead passed "{self.last_layer_prior}"'
+                )
+
+        self.blr_model = BayesianLinearRegression(**self.last_layer_prior_params)
         self.blr_model.fit(features_train, y_train)
         return self
 
