@@ -9,7 +9,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from sklearn import preprocessing
 
-from core.map import MapDensityEnsemble
+from core.map import MapDensityEnsemble, map_density_ensemble_from_save_path
 from core.plotting_utils import (
     plot_distribution_samples,
     plot_ground_truth,
@@ -27,8 +27,6 @@ tfd = tfp.distributions
 
 
 # %% codecell
-assert tf.executing_eagerly()
-
 figure_dir = "./figures"
 
 
@@ -40,7 +38,7 @@ batchsize_train = 20
 
 # train and test variables beginning with an underscore are unprocessed.
 _x_train, y_train = create_split_periodic_data_heteroscedastic(
-    n_data=n_train, sigma1=2, sigma2=2, seed=42
+    n_data=n_train, sigma1=0.2, sigma2=0.2, seed=42
 )
 preprocessor = StandardPreprocessor()
 x_train, _x_plot, x_plot = preprocessor.preprocess_create_x_train_x_plot(_x_train)
@@ -65,9 +63,8 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
 )
 
 
-# %% codecell
 ensemble = MapDensityEnsemble(
-    n_networks=n_networks,
+    n_networks=2,
     input_shape=[1],
     layer_units=layer_units,
     layer_activations=layer_activations,
@@ -77,7 +74,7 @@ ensemble = MapDensityEnsemble(
 
 
 ensemble.fit(
-    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=500, verbose=0
+    x_train=x_train, y_train=y_train, batch_size=batchsize_train, epochs=100, verbose=0
 )
 
 
@@ -91,7 +88,33 @@ plot_moment_matched_predictive_normal_distribution(
     y_ground_truth=y_ground_truth,
     y_lim=y_lim,
 )
+# %%
+ensemble.fit_additional_memebers(
+    x_train=x_train,
+    y_train=y_train,
+    batch_size=batchsize_train,
+    n_new_members=2,
+    epochs=100,
+    verbose=0,
+)
+mog_prediction = ensemble.predict(x_plot)  # Mixture Of Gaussian prediction
+plot_moment_matched_predictive_normal_distribution(
+    x_plot=_x_plot,
+    predictive_distribution=mog_prediction,
+    x_train=_x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
+)
 
+
+# %%
+save_path = "._toy_ensemble_saving"
+ensemble.save(save_path)
+
+# %%
+loaded_ensemble = map_density_ensemble_from_save_path(save_path)
+ensemble = loaded_ensemble
 
 # %% codecell
 gaussian_predictions = ensemble.predict_list_of_gaussians(x_plot, n_predictions=3)

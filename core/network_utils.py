@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 
+@tf.keras.utils.register_keras_serializable()
 class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization):
     """
     tf.keras.layers.experimental.preprocessing.Normalization cannot deal with training
@@ -22,7 +23,13 @@ class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization)
         imask = tf.where(
             bmask, tf.ones_like(self.variance), tf.zeros_like(self.variance)
         )
+
         self.variance = self.variance + imask
+
+    def get_config(self):
+        config = super().get_config()
+        # config.update({"variance": self.variance})
+        return config
 
 
 class AddSigmaLayer(tf.keras.layers.Layer):
@@ -40,8 +47,8 @@ class AddSigmaLayer(tf.keras.layers.Layer):
     This is useful to model homoscedastic noise variance explicitly.
     """
 
-    def __init__(self, initial_value=0.0):
-        super().__init__()
+    def __init__(self, initial_value=0.0, **kwargs):
+        super().__init__(**kwargs)
         self.sigma = tf.Variable(
             [[initial_value]], name="sigma", dtype="float32", trainable=True
         )
@@ -54,6 +61,12 @@ class AddSigmaLayer(tf.keras.layers.Layer):
         # sigmas = tf.repeat(self.sigma, input.shape[0])
         # sigmas = tf.expand_dims(sigmas, axis=-1)
         return tf.concat([input, sigmas], axis=-1)
+
+    # def get_config(self):
+    #     config = super().get_config()
+    #     config.update({"sigma": self.sigma})
+    #     #config.update({"units": self.units})
+    #     return config
 
 
 def _linspace_network_indices(n_networks, n_predictions):

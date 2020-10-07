@@ -1,4 +1,6 @@
+import pickle
 from collections import Iterable
+from pathlib import Path
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -40,7 +42,7 @@ class MapDensityEnsemble:
         uncertainty is also represented in the different mean functions that are
         learned.
         """
-        self.n_networks = n_networks
+        self._n_networks = n_networks
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
@@ -48,7 +50,7 @@ class MapDensityEnsemble:
         if not isinstance(initial_unconstrained_scale, Iterable):
             self.initial_unconstrained_scale = [
                 initial_unconstrained_scale
-            ] * self.n_networks
+            ] * self._n_networks
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -56,13 +58,17 @@ class MapDensityEnsemble:
         self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
         if not isinstance(self.l2_weight_lambda, Iterable):
-            self.l2_weight_lambda = [self.l2_weight_lambda] * self.n_networks
+            self.l2_weight_lambda = [self.l2_weight_lambda] * self._n_networks
         if not isinstance(self.l2_bias_lambda, Iterable):
-            self.l2_bias_lambda = [self.l2_bias_lambda] * self.n_networks
+            self.l2_bias_lambda = [self.l2_bias_lambda] * self._n_networks
         if not isinstance(seed, Iterable):
-            seed = [seed + (i / self.n_networks) * 1e3 for i in range(self.n_networks)]
+            delta = 100  # earliest seed that has almost the same trained models as 0.
+            seed = [i for i in range(seed, seed + self._n_networks * delta, delta)]
         self.names = names
         self.seed = seed
+
+        self.total_epochs = None
+
         tf.random.set_seed(self.seed[0])
 
         self.networks = [
@@ -71,7 +77,7 @@ class MapDensityEnsemble:
                 self.layer_units,
                 self.layer_activations,
                 initial_unconstrained_scale=initial_unconstrained_scale,
-                transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
+                transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
                 preprocess_x=self.preprocess_x,
@@ -88,30 +94,66 @@ class MapDensityEnsemble:
             )
         ]
 
-    def clone(self):
-        if isinstance(
-            self.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule
-        ):
-            print(
-                "Cloning will likely not work as desired. Check wether the learning rate schedule is reset."
-            )
-        return MapDensityEnsemble(
-            n_networks=self.n_networks,
-            input_shape=self.input_shape,
-            layer_units=self.layer_units,
-            layer_activations=self.layer_activations,
-            initial_unconstrained_scale=self.initial_unconstrained_scale,
-            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
-            l2_weight_lambda=self.l2_weight_lambda,
-            l2_bias_lambda=self.l2_bias_lambda,
-            preprocess_x=self.preprocess_x,
-            preprocess_y=self.preprocess_y,
-            learning_rate=self.learning_rate,
-            seed=self.seed,
-        )
+    @property
+    def n_networks(self):
+        return len(self.networks)
 
-    def fit(
+    def fit_additional_memebers(
         self,
+        x_train,
+        y_train,
+        batch_size,
+        n_new_members=5,
+        epochs=200,
+        early_stop_callback=None,
+        validation_split=0.0,
+        validation_data=None,
+        verbose=1,
+    ):
+        delta = 100
+        seeds = [
+            i
+            for i in range(
+                self.seed[-1] + delta,
+                self.seed[-1] + delta + n_new_members * delta,
+                delta,
+            )
+        ]
+        new_networks = [
+            MapDensityNetwork(
+                self.input_shape,
+                self.layer_units,
+                self.layer_activations,
+                initial_unconstrained_scale=self.initial_unconstrained_scale[0],
+                transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+                l2_weight_lambda=self.l2_weight_lambda[0],
+                l2_bias_lambda=self.l2_bias_lambda[0],
+                preprocess_x=self.preprocess_x,
+                preprocess_y=self.preprocess_y,
+                learning_rate=self.learning_rate,
+                names=self.names,
+                seed=seed,
+            )
+            for seed in seeds
+        ]
+        self._n_networks += n_new_members
+        self.fit_member_networks(
+            new_networks,
+            x_train,
+            y_train,
+            batch_size,
+            epochs=epochs,
+            early_stop_callback=early_stop_callback,
+            validation_split=validation_split,
+            validation_data=validation_data,
+            verbose=verbose,
+        )
+        self.networks += new_networks
+        return self
+
+    def fit_member_networks(
+        self,
+        member_networks,
         x_train,
         y_train,
         batch_size,
@@ -124,8 +166,9 @@ class MapDensityEnsemble:
         tf.random.set_seed(self.seed[0])
         if not isinstance(epochs, Iterable):
             epochs = [epochs] * self.n_networks
-        self.total_epochs = []
-        for network, epoch in zip(self.networks, epochs):
+        if self.total_epochs is None:
+            self.total_epochs = []
+        for network, epoch in zip(member_networks, epochs):
             network.fit(
                 x_train,
                 y_train,
@@ -138,6 +181,29 @@ class MapDensityEnsemble:
             )
             self.total_epochs.append(network.total_epochs)
         return self
+
+    def fit(
+        self,
+        x_train,
+        y_train,
+        batch_size,
+        epochs=200,
+        early_stop_callback=None,
+        validation_split=0.0,
+        validation_data=None,
+        verbose=1,
+    ):
+        self.fit_member_networks(
+            self.networks,
+            x_train,
+            y_train,
+            batch_size,
+            epochs=epochs,
+            early_stop_callback=early_stop_callback,
+            validation_split=validation_split,
+            validation_data=validation_data,
+            verbose=verbose,
+        )
 
     def rmse(self, x, y):
         mean_prediction = self.predict(x).mean()
@@ -155,7 +221,9 @@ class MapDensityEnsemble:
 
     def predict_mixture_of_gaussians(self, x_test):
         gaussians = self.predict_list_of_gaussians(x_test)
-        cat_probs = tf.ones((x_test.shape[0],) + (1, self.n_networks)) / self.n_networks
+        cat_probs = tf.ones((x_test.shape[0],) + (1, self.n_networks)) / len(
+            self.networks
+        )
         return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
 
     def predict_moment_matched_gaussian(self, x_test):
@@ -181,6 +249,16 @@ class MapDensityEnsemble:
     def set_weights(self, networks_weights_list):
         for network, network_weights in zip(self.networks, networks_weights_list):
             network.set_weights(network_weights)
+
+    def save(self, save_path):
+        save_path = Path(save_path)
+        for i, net in enumerate(self.networks):
+            net.save(save_path.joinpath(f"_{i}"))
+        networks = self.networks
+        self.networks = None
+        with open(save_path.joinpath("pickle_class"), "wb") as f:
+            pickle.dump(self, f, -1)
+        self.networks = networks
 
 
 class MapDensityNetwork:
@@ -229,15 +307,17 @@ class MapDensityNetwork:
             normalization_layer=self.preprocess_x,
             names=self.names,
         )
-        if initial_unconstrained_scale is not None:
+        if self.initial_unconstrained_scale is not None:
             # print("homoscedastic noise")
-            self.network.add(AddSigmaLayer(initial_unconstrained_scale))
+            self.network.add(
+                AddSigmaLayer(self.initial_unconstrained_scale, name="aleatoric_noise")
+            )
         self.network.add(
             tfp.layers.DistributionLambda(
                 lambda t: tfd.Normal(
                     loc=t[..., :1],
                     scale=transform_unconstrained_scale(
-                        t[..., 1:], transform_unconstrained_scale_factor
+                        t[..., 1:], self.transform_unconstrained_scale_factor
                     ),
                 )
             )
@@ -248,27 +328,15 @@ class MapDensityNetwork:
             loss=MapDensityNetwork.negative_log_likelihood,
         )
 
-    def clone(self):
-        if isinstance(
-            self.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule
-        ):
-            print(
-                "Cloning will likely not work as desired. Check wether the learning rate schedule is reset."
+    @property
+    def noise_sigma(self):
+        if self.initial_unconstrained_scale is not None:
+            unconstrained_sigma = self.network.get_layer("aleatoric_noise").sigma[0, 0]
+            return transform_unconstrained_scale(
+                unconstrained_sigma, self.transform_unconstrained_scale_factor
             )
-        return MapDensityNetwork(
-            input_shape=self.input_shape,
-            layer_units=self.layer_units,
-            layer_activations=self.layer_activations,
-            initial_unconstrained_scale=self.initial_unconstrained_scale,
-            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
-            l2_weight_lambda=self.l2_weight_lambda,
-            l2_bias_lambda=self.l2_bias_lambda,
-            preprocess_x=self.preprocess_x,
-            preprocess_y=self.preprocess_y,
-            learning_rate=self.learning_rate,
-            names=self.names,
-            seed=self.seed,
-        )
+        else:
+            return None  # in this case the noise sigma depends on the input
 
     def negative_log_prior(self):
         params = self.get_weights()
@@ -414,3 +482,42 @@ class MapDensityNetwork:
     def set_weights(self, weights_list):
         weights_list[-1] = weights_list[-1].reshape(1, 1)
         self.network.set_weights(weights_list)
+
+    def save(self, save_path):
+        self.network.save(save_path)
+        network = self.network
+        history = self.history
+        self.network = None
+        self.history = None
+        save_path = Path(save_path)
+        with open(save_path.joinpath("pickle_class"), "wb") as f:
+            pickle.dump(self, f, -1)
+        self.network = network
+        self.history = history
+
+
+def map_density_ensemble_from_save_path(save_path):
+    save_path = Path(save_path)
+    with open(save_path.joinpath("pickle_class"), "rb") as f:
+        ensemble = pickle.load(f)
+    networks = [
+        map_density_network_from_save_path(save_path.joinpath(f"_{i}"))
+        for i in range(ensemble._n_networks)
+    ]
+    ensemble.networks = networks
+    return ensemble
+
+
+def map_density_network_from_save_path(save_path):
+    save_path = Path(save_path)
+    with open(save_path.joinpath("pickle_class"), "rb") as f:
+        net = pickle.load(f)
+    net.network = tf.keras.models.load_model(save_path, compile=False)
+    net.network.compile(
+        optimizer=tf.keras.optimizers.Adam(net.learning_rate),
+        loss=MapDensityNetwork.negative_log_likelihood,
+    )
+    print(
+        "When resuming training on this model, check wether the optimizers state is set correctly. Likely it starts from step 0 again. Which might be a problem for LearningRateSchedules."
+    )
+    return net
