@@ -1,21 +1,53 @@
 import inspect
+import itertools
 import json
+import random
 import time
 from pathlib import Path
 
 import numpy as np
+import scipy as scp
+import seaborn as sns
 import tensorflow as tf
 import tensorflow_probability as tfp
+import yaml
 from sklearn.model_selection import RepeatedKFold, train_test_split
 
 from core.last_layer import PostHocLastLayerBayesianEnsemble as LLBEnsemble
 from core.last_layer import PostHocLastLayerBayesianNetwork as LLBNetwork
-from core.map import MapDensityEnsemble, MapDensityNetwork
-from core.plotting_utils import plot_uci_single_benchmark
+from core.map import (
+    MapDensityEnsemble,
+    MapDensityNetwork,
+    map_density_ensemble_from_save_path,
+)
+from core.network_utils import prior_scale_to_regularization_lambda
+from core.plotting_utils import (
+    plot_uci_ensemble_size_benchmark,
+    plot_uci_single_benchmark,
+)
 from core.variational import VariationalDensityNetwork
 from data.uci import load_uci_data
 
 tfd = tfp.distributions
+
+
+def load_models(save_dir, load_model_function):
+    paths = Path(save_dir).glob("*")
+    model_files = sorted([x for x in paths if x.is_dir()])
+    print(model_files)
+    models = []
+    if len(model_files) == 0:
+        raise RuntimeError(f"No models found at {save_dir}.")
+    for file in model_files:
+        models.append(load_model_function(file))
+    return models
+
+
+def save_models(save_dir, models):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    for i, model in enumerate(models):
+        model.save(save_dir.joinpath(f"model_{i:03}"))
 
 
 def calculate_rmse(mean_prediction, y):
@@ -110,6 +142,8 @@ def kfold_evaluate_uci(
     use_gap_data=False,
     train_seed=0,
     validation_split=0.0,
+    weight_prior_scale=None,
+    bias_prior_scale=None,
     model_kwargs={},
     fit_kwargs={},
     fit_kwargs_list=None,
@@ -149,6 +183,18 @@ def kfold_evaluate_uci(
             validation_data = None
         if model_class == VariationalDensityNetwork:
             model_kwargs["kl_weight"] = 1 / x_train.shape[0]
+        if weight_prior_scale is not None:
+            n_train = x_train.shape[0]
+            l2_weight_lambda = prior_scale_to_regularization_lambda(
+                weight_prior_scale, n_train
+            )
+            model_kwargs["l2_weight_lambda"] = l2_weight_lambda
+        if bias_prior_scale is not None:
+            n_train = x_train.shape[0]
+            l2_bias_lambda = prior_scale_to_regularization_lambda(
+                bias_prior_scale, n_train
+            )
+            model_kwargs["l2_bias_lambda"] = l2_bias_lambda
         model = model_class(**model_kwargs, seed=train_seed + i)
         if model_class == VariationalDensityNetwork:
             model_kwargs.pop("kl_weight")
@@ -216,7 +262,16 @@ def benchmark_models_uci(
     ensemble_n_networks=5,
     early_stop_callback=None,
     validation_split=0.0,
+    weight_prior_scale=None,
+    bias_prior_scale=None,
+    last_layer_prior="non-informative",
+    last_layer_prior_params=None,
+    vi_flat_prior=True,
+    evaluate_ignore_prior_loss=True,
 ):
+    # print(
+    #     "Even when passing regularization parameteres, no prior is yet passed to llb nets."
+    # )
     results = {}
     fit_kwargs = {
         "epochs": epochs,
@@ -234,6 +289,7 @@ def benchmark_models_uci(
         "preprocess_y": True,
         "learning_rate": learning_rate,
         "names": layer_names,
+        "evaluate_ignore_prior_loss": evaluate_ignore_prior_loss,
     }
 
     (
@@ -258,30 +314,32 @@ def benchmark_models_uci(
         "fit_times": vi_prior_fit_times,
     }
     print("VI-Prior Done")
-    model_kwargs["prior_scale_identity_multiplier"] = 1e6
-    (
-        vi_flat_prior_rmses,
-        vi_flat_prior_negative_log_likelihoods,
-        vi_flat_prior_models,
-        vi_flat_prior_total_epochs,
-        vi_flat_prior_fit_times,
-    ) = kfold_evaluate_uci(
-        dataset=dataset,
-        use_gap_data=use_gap_data,
-        model_class=VariationalDensityNetwork,
-        train_seed=train_seed,
-        validation_split=validation_split,
-        model_kwargs=model_kwargs,
-        fit_kwargs=fit_kwargs,
-    )
-    results["VI-Flat-Prior"] = {
-        "RMSEs": vi_flat_prior_rmses,
-        "NLLs": vi_flat_prior_negative_log_likelihoods,
-        "total_epochs": vi_flat_prior_total_epochs,
-        "fit_times": vi_flat_prior_fit_times,
-    }
-    print("VI-Flat-Prior Done")
+    if vi_flat_prior:
+        model_kwargs["prior_scale_identity_multiplier"] = 1e6
+        (
+            vi_flat_prior_rmses,
+            vi_flat_prior_negative_log_likelihoods,
+            vi_flat_prior_models,
+            vi_flat_prior_total_epochs,
+            vi_flat_prior_fit_times,
+        ) = kfold_evaluate_uci(
+            dataset=dataset,
+            use_gap_data=use_gap_data,
+            model_class=VariationalDensityNetwork,
+            train_seed=train_seed,
+            validation_split=validation_split,
+            model_kwargs=model_kwargs,
+            fit_kwargs=fit_kwargs,
+        )
+        results["VI-Flat-Prior"] = {
+            "RMSEs": vi_flat_prior_rmses,
+            "NLLs": vi_flat_prior_negative_log_likelihoods,
+            "total_epochs": vi_flat_prior_total_epochs,
+            "fit_times": vi_flat_prior_fit_times,
+        }
+        print("VI-Flat-Prior Done")
     model_kwargs.pop("prior_scale_identity_multiplier")
+    model_kwargs.pop("evaluate_ignore_prior_loss")
     (
         map_rmses,
         map_negative_log_likelihoods,
@@ -294,6 +352,8 @@ def benchmark_models_uci(
         model_class=MapDensityNetwork,
         train_seed=train_seed,
         validation_split=validation_split,
+        weight_prior_scale=weight_prior_scale,
+        bias_prior_scale=bias_prior_scale,
         model_kwargs=model_kwargs,
         fit_kwargs=fit_kwargs,
     )
@@ -305,6 +365,8 @@ def benchmark_models_uci(
     }
     print("Map Done")
     model_kwargs.pop("names")
+    model_kwargs["last_layer_prior"] = last_layer_prior
+    model_kwargs["last_layer_prior_params"] = last_layer_prior_params
     llb_fit_kwargs_list = [{"pretrained_network": model} for model in map_models]
     (
         llb_rmses,
@@ -327,6 +389,8 @@ def benchmark_models_uci(
         "fit_times": llb_fit_times,
     }
     print("LLB Done")
+    model_kwargs.pop("last_layer_prior")
+    model_kwargs.pop("last_layer_prior_params")
     model_kwargs["names"] = layer_names
     model_kwargs["n_networks"] = ensemble_n_networks
     (
@@ -342,6 +406,8 @@ def benchmark_models_uci(
         model_class=MapDensityEnsemble,
         train_seed=train_seed,
         validation_split=validation_split,
+        weight_prior_scale=weight_prior_scale,
+        bias_prior_scale=bias_prior_scale,
         model_kwargs=model_kwargs,
         fit_kwargs=fit_kwargs,
         ensemble_predict_moment_matched=True,
@@ -355,6 +421,8 @@ def benchmark_models_uci(
     }
     print("Ensemble Done")
     model_kwargs.pop("names")
+    model_kwargs["last_layer_prior"] = last_layer_prior
+    model_kwargs["last_layer_prior_params"] = last_layer_prior_params
     llb_ensemble_fit_kwargs_list = [
         {"pretrained_networks": model.networks} for model in ensemble_models
     ]
@@ -384,7 +452,9 @@ def benchmark_models_uci(
     return results
 
 
-def save_results(experiment_name, dataset, results, use_gap_data=False):
+def save_results(
+    experiment_name, dataset, results, use_gap_data=False, sub_folder=None
+):
     """
     This function receives the experimental results. If already a json file exists to
     this experiment_name and dataset, it will read from that json file and compare the
@@ -394,6 +464,8 @@ def save_results(experiment_name, dataset, results, use_gap_data=False):
     """
     data_path = "uci_gap_data" if use_gap_data else "uci_data"
     dir = Path(f"{data_path}/{dataset}/results/")
+    if sub_folder is not None:
+        dir = dir.joinpath(sub_folder)
     dir.mkdir(parents=True, exist_ok=True)
     experiment_path = dir / f"{experiment_name}.json"
     if experiment_path.is_file():
@@ -429,6 +501,12 @@ def uci_benchmark_save_plot(
     ensemble_n_networks=5,
     early_stop_callback=None,
     validation_split=0.0,
+    weight_prior_scale=None,
+    bias_prior_scale=None,
+    last_layer_prior="non-informative",
+    last_layer_prior_params=None,
+    vi_flat_prior=True,
+    evaluate_ignore_prior_loss=True,
     save=True,
 ):
     results = benchmark_models_uci(
@@ -445,21 +523,28 @@ def uci_benchmark_save_plot(
         batch_size=batch_size,
         early_stop_callback=early_stop_callback,
         validation_split=validation_split,
+        weight_prior_scale=weight_prior_scale,
+        bias_prior_scale=bias_prior_scale,
+        last_layer_prior=last_layer_prior,
+        last_layer_prior_params=last_layer_prior_params,
+        evaluate_ignore_prior_loss=evaluate_ignore_prior_loss,
     )
 
     if save:
-        save_results(
-            experiment_name, dataset, results, use_gap_data=use_gap_data,
-        )
+        save_results(experiment_name, dataset, results, use_gap_data=use_gap_data)
 
-    labels = [
-        "VI-Prior",
-        "VI-Flat-Prior",
-        "Map",
-        "Last Layer Bayesian",
-        "Ensemble",
-        "LLB Ensemble",
-    ]
+    labels = (
+        [
+            "VI-Prior",
+            "VI-Flat-Prior",
+            "Map",
+            "Last Layer Bayesian",
+            "Ensemble",
+            "LLB Ensemble",
+        ]
+        if vi_flat_prior
+        else ["VI-Prior", "Map", "Last Layer Bayesian", "Ensemble", "LLB Ensemble"]
+    )
     title = f"{dataset.capitalize()}; Average Test RMSE"
     y_label = "RMSE"
     plot_uci_single_benchmark(

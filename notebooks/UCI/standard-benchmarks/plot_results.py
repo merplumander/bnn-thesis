@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import yaml
 
 from core.plotting_utils import plot_uci_single_benchmark
 
@@ -16,17 +17,9 @@ figure_dir = Path(figure_dir)
 figure_dir.mkdir(parents=True, exist_ok=True)
 
 
-color_mapping = {
-    "VI": 0,
-    "Map": 1,
-    "Last Layer Bayesian": 2,
-    "Ensemble MM": 3,
-    "LLB Ensemble MM": 4,
-    "Ensemble": 5,
-    "LLB Ensemble": 6,
-    "VI-Flat-Prior": 7,
-}
 colors = sns.color_palette()
+with open("config/uci-color-config.yaml") as f:
+    color_mapping = yaml.full_load(f)
 figsize = (18, 6)
 legend_kwargs = {"bbox_to_anchor": (1.0, 1), "loc": "upper left"}
 
@@ -189,6 +182,86 @@ fig.savefig(save_path, bbox_inches="tight")
 
 
 # %% markdown
+# # L2 convergence rmses
+
+# %%
+weight_prior_scale = 1
+patience = 20
+experiment_name = (
+    f"l2-reg-prior-scale-{weight_prior_scale}-patience-{patience}_one-hidden-layer"
+)
+models = ["VI-Prior", "Map", "Last Layer Bayesian", "Ensemble", "LLB Ensemble"]
+labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
+
+fig, (axes) = plt.subplots(1, len(datasets), figsize=figsize)
+legend = False
+for i, dataset in enumerate(datasets):
+    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    results = json.loads(experiment_path.read_text())
+    rmses = [results[model]["RMSEs"] for model in models]
+    y_label = None
+    if i == 0:
+        y_label = "RMSE"
+    if i == len(datasets) - 1:
+        legend = True
+    plot_uci_single_benchmark(
+        rmses,
+        labels=labels,
+        ax_title=dataset,
+        y_label=y_label,
+        legend=legend,
+        legend_kwargs=legend_kwargs,
+        colors=[colors[color_mapping[method]] for method in labels],
+        fig=fig,
+        ax=axes[i],
+    )
+fig.tight_layout()
+save_path = figure_dir.joinpath(f"uci_{experiment_name}_rmses.pdf")
+fig.savefig(save_path, bbox_inches="tight")
+
+# %% markdown
+# # L2 convergence NLLs
+
+# %%
+weight_prior_scale = 1
+patience = 20
+experiment_name = (
+    f"l2-reg-prior-scale-{weight_prior_scale}-patience-{patience}_one-hidden-layer"
+)
+models = ["VI-Prior", "Map", "Last Layer Bayesian", "Ensemble", "LLB Ensemble"]
+labels = ["VI", "Map", "Last Layer Bayesian", "Ensemble MM", "LLB Ensemble MM"]
+
+figsize = (12, 6)
+fig, (axes) = plt.subplots(2, int(np.ceil(len(datasets) / 2)), figsize=figsize)
+axes = axes.flatten()
+legend = False
+for i, dataset in enumerate(datasets):
+    experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")
+    results = json.loads(experiment_path.read_text())
+    nlls = [results[model]["NLLs"] for model in models[0:4]]
+    nlls += [results[model]["MM-NLLs"] for model in models[4:]]
+    y_label = None
+    if i == 0:
+        y_label = "Negative Log Likelihood"
+    if i == len(datasets) - 1:
+        legend = True
+    plot_uci_single_benchmark(
+        nlls,
+        labels=labels,
+        ax_title=dataset,
+        y_label=y_label,
+        legend=legend,
+        legend_kwargs=legend_kwargs,
+        colors=[colors[color_mapping[method]] for method in labels],
+        fig=fig,
+        ax=axes[i],
+    )
+fig.tight_layout()
+save_path = figure_dir.joinpath(f"uci_{experiment_name}_nlls.pdf")
+# fig.savefig(save_path, bbox_inches="tight")
+
+
+# %% markdown
 # # Moment matched versus Mixture prediction
 
 # Cocnlusion: In terms of log likelihood it does not make a big difference whether to
@@ -196,8 +269,12 @@ fig.savefig(save_path, bbox_inches="tight")
 # (ensemble size = 5). Perhaps the moment matched version is slightly superior.
 
 # %%
+weight_prior_scale = 1
 patience = 20
-experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
+experiment_name = (
+    f"l2-reg-prior-scale-{weight_prior_scale}-patience-{patience}_one-hidden-layer"
+)
+# experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
 # experiment_name = "epochs-40_one-hidden-layer"
 models = ["Ensemble", "LLB Ensemble"]
 
@@ -295,8 +372,12 @@ fig.savefig(save_path, bbox_inches="tight")
 # training time on top. In fact it is more like 0.3%.
 
 # %%
+weight_prior_scale = 1
 patience = 20
-experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
+experiment_name = (
+    f"l2-reg-prior-scale-{weight_prior_scale}-patience-{patience}_one-hidden-layer"
+)
+# experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
 models = ["Map", "Last Layer Bayesian"]
 for i, dataset in enumerate(datasets):
     experiment_path = Path(f"uci_data/{dataset}/results/{experiment_name}.json")

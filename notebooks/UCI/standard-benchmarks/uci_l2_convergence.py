@@ -8,6 +8,7 @@ import numpy as np
 import seaborn as sns
 import tensorflow as tf
 
+from core.network_utils import prior_scale_to_regularization_lambda
 from core.plotting_utils import plot_uci_single_benchmark
 from core.uci_evaluation import uci_benchmark_save_plot
 
@@ -27,14 +28,21 @@ learning_rate = 0.01
 epochs = int(1e5)
 batch_size = 100
 
-patience = 10
+patience = 20
 early_stop_callback = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss", patience=patience, verbose=0, restore_best_weights=True
+    monitor="loss", patience=patience, verbose=0, restore_best_weights=True
 )
-validation_split = 0.2
 
-experiment_name = f"early-stop-patience-{patience}_one-hidden-layer"
+weight_prior_scale = 1
+bias_prior_scale = weight_prior_scale
+# l2_weight_lambda = prior_scale_to_regularization_lambda(weight_prior_scale, n_train)
+# l2_bias_lambda = prior_scale_to_regularization_lambda(bias_prior_scale, n_train)
 
+experiment_name = (
+    f"l2-reg-prior-scale-{weight_prior_scale}-patience-{patience}_one-hidden-layer"
+)
+
+n_features = layer_units[-1] + 1
 kwargs = {
     "experiment_name": experiment_name,
     "figure_dir": figure_dir,
@@ -47,7 +55,13 @@ kwargs = {
     "epochs": epochs,
     "batch_size": batch_size,
     "early_stop_callback": early_stop_callback,
-    "validation_split": validation_split,
+    "weight_prior_scale": weight_prior_scale,
+    "bias_prior_scale": bias_prior_scale,
+    "vi_flat_prior": True,
+    "evaluate_ignore_prior_loss": False,
+    "last_layer_prior": "standard-normal-weights-non-informative-scale",
+    "save": True
+    # "validation_split": validation_split,
 }
 
 # %%
