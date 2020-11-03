@@ -39,7 +39,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-# %%
 from core.hmc import HMCDensityNetwork, hmc_density_network_from_save_path
 from core.last_layer import PostHocLastLayerBayesianEnsemble as LLBEnsemble
 from core.last_layer import PostHocLastLayerBayesianNetwork as LLBNetwork
