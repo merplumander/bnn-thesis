@@ -25,3 +25,4 @@ uci_data
 uci_gap_data
 ._toy_network_saving
 .save_uci_models
+notebooks/deletable

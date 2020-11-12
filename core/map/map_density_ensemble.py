@@ -26,6 +26,10 @@ class MapDensityEnsemble:
         layer_activations=["relu", "relu", "linear"],
         initial_unconstrained_scale=None,  # None, float or Iterable
         transform_unconstrained_scale_factor=0.05,
+        weight_prior=None,
+        bias_prior=None,
+        scale_prior=None,
+        n_train=None,
         l2_weight_lambda=None,
         l2_bias_lambda=None,
         preprocess_x=False,
@@ -52,6 +56,10 @@ class MapDensityEnsemble:
                 initial_unconstrained_scale
             ] * self._n_networks
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
+        self.weight_prior = weight_prior
+        self.bias_prior = bias_prior
+        self.scale_prior = scale_prior
+        self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
         self.preprocess_x = preprocess_x
@@ -78,6 +86,10 @@ class MapDensityEnsemble:
                 self.layer_activations,
                 initial_unconstrained_scale=initial_unconstrained_scale,
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+                weight_prior=self.weight_prior,
+                bias_prior=self.bias_prior,
+                scale_prior=self.scale_prior,
+                n_train=self.n_train,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
                 preprocess_x=self.preprocess_x,
@@ -126,6 +138,10 @@ class MapDensityEnsemble:
                 self.layer_activations,
                 initial_unconstrained_scale=self.initial_unconstrained_scale[0],
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+                weight_prior=self.weight_prior,
+                bias_prior=self.bias_prior,
+                scale_prior=self.scale_prior,
+                n_train=self.n_train,
                 l2_weight_lambda=self.l2_weight_lambda[0],
                 l2_bias_lambda=self.l2_bias_lambda[0],
                 preprocess_x=self.preprocess_x,
@@ -269,6 +285,10 @@ class MapDensityNetwork:
         layer_activations=["relu", "relu", "linear"],
         initial_unconstrained_scale=None,  # unconstrained noise standard deviation. When None, the noise std is model by a second network output. When float, the noise std is homoscedastic.
         transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
+        weight_prior=None,
+        bias_prior=None,
+        scale_prior=None,
+        n_train=None,
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
         preprocess_x=False,
@@ -286,6 +306,10 @@ class MapDensityNetwork:
         self.layer_activations = layer_activations
         self.initial_unconstrained_scale = initial_unconstrained_scale
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
+        self.weight_prior = weight_prior
+        self.bias_prior = bias_prior
+        self.scale_prior = scale_prior
+        self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
         self.preprocess_x = preprocess_x
@@ -302,6 +326,9 @@ class MapDensityNetwork:
             self.input_shape,
             self.layer_units,
             self.layer_activations,
+            weight_prior=self.weight_prior,
+            bias_prior=self.bias_prior,
+            n_train=self.n_train,
             l2_weight_lambda=self.l2_weight_lambda,
             l2_bias_lambda=self.l2_bias_lambda,
             normalization_layer=self.preprocess_x,
@@ -309,9 +336,21 @@ class MapDensityNetwork:
         )
         if self.initial_unconstrained_scale is not None:
             # print("homoscedastic noise")
-            self.network.add(
-                AddSigmaLayer(self.initial_unconstrained_scale, name="aleatoric_noise")
+            layer = AddSigmaLayer(
+                self.initial_unconstrained_scale, name="aleatoric_noise"
             )
+            if self.scale_prior is not None:
+                self.network.add_loss(
+                    lambda: -tf.reduce_sum(
+                        self.scale_prior.log_prob(
+                            transform_unconstrained_scale(
+                                layer.sigma, self.transform_unconstrained_scale_factor
+                            )
+                        )
+                    )
+                    / self.n_train
+                )
+            self.network.add(layer)
         self.network.add(
             tfp.layers.DistributionLambda(
                 lambda t: tfd.Normal(

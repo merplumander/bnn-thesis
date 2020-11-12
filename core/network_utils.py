@@ -7,7 +7,7 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 
-@tf.keras.utils.register_keras_serializable()
+# @tf.keras.utils.register_keras_serializable()
 class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization):
     """
     tf.keras.layers.experimental.preprocessing.Normalization cannot deal with training
@@ -210,6 +210,9 @@ def build_keras_model(
     input_shape=[1],
     layer_units=[200, 100, 1],
     layer_activations=["relu", "relu", "linear"],
+    weight_prior=None,
+    bias_prior=None,
+    n_train=None,
     l2_weight_lambda=None,
     l2_bias_lambda=None,
     normalization_layer=False,
@@ -238,18 +241,113 @@ def build_keras_model(
     if normalization_layer:
         model.add(NormalizationFix(input_shape=input_shape, name="normalization"))
 
-    for units, activation, name, kernel_regularizer, bias_regularizer in zip(
-        layer_units, layer_activations, names, kernel_regularizers, bias_regularizers
-    ):
-        model.add(
-            tf.keras.layers.Dense(
-                units,
-                activation=activation,
-                name=name,
-                kernel_regularizer=kernel_regularizer,
-                bias_regularizer=bias_regularizer,
-            )
+    # The code below for creating the layers is really stupid. But it is necessary,
+    # because the following code does not work because of tensorflow bug:
+    # https://github.com/tensorflow/tensorflow/issues/44590
+
+    # for i, (units, activation, name, kernel_regularizer, bias_regularizer) in enumerate(zip(
+    #     layer_units, layer_activations, names, kernel_regularizers, bias_regularizers
+    # )):
+    #     layer = tf.keras.layers.Dense(
+    #         units,
+    #         activation=activation,
+    #         name=name,
+    #         kernel_regularizer=kernel_regularizer,
+    #         bias_regularizer=bias_regularizer,
+    #     )
+    #     # if weight_prior:
+    #     #     model.add_loss(lambda :-tf.reduce_sum(weight_prior.log_prob(layer.kernel)))
+    #     # if bias_prior:
+    #     #     layer.add_loss(lambda :-tf.reduce_sum(bias_prior.log_prob(layer.bias)))
+
+    #     model.add(layer)
+    layer0 = tf.keras.layers.Dense(
+        layer_units[0],
+        activation=layer_activations[0],
+        name=names[0],
+        kernel_regularizer=kernel_regularizers[0],
+        bias_regularizer=bias_regularizers[0],
+    )
+    if weight_prior:
+        layer0.add_loss(
+            lambda: -tf.reduce_sum(weight_prior.log_prob(layer0.kernel)) / n_train
         )
+    if bias_prior:
+        layer0.add_loss(
+            lambda: -tf.reduce_sum(bias_prior.log_prob(layer0.bias)) / n_train
+        )
+    model.add(layer0)
+    if len(layer_units) > 1:
+        layer1 = tf.keras.layers.Dense(
+            layer_units[1],
+            activation=layer_activations[1],
+            name=names[1],
+            kernel_regularizer=kernel_regularizers[1],
+            bias_regularizer=bias_regularizers[1],
+        )
+        if weight_prior:
+            layer1.add_loss(
+                lambda: -tf.reduce_sum(weight_prior.log_prob(layer1.kernel)) / n_train
+            )
+        if bias_prior:
+            layer1.add_loss(
+                lambda: -tf.reduce_sum(bias_prior.log_prob(layer1.bias)) / n_train
+            )
+        model.add(layer1)
+    if len(layer_units) > 2:
+        layer2 = tf.keras.layers.Dense(
+            layer_units[2],
+            activation=layer_activations[2],
+            name=names[2],
+            kernel_regularizer=kernel_regularizers[2],
+            bias_regularizer=bias_regularizers[2],
+        )
+        if weight_prior:
+            layer2.add_loss(
+                lambda: -tf.reduce_sum(weight_prior.log_prob(layer2.kernel)) / n_train
+            )
+        if bias_prior:
+            layer2.add_loss(
+                lambda: -tf.reduce_sum(bias_prior.log_prob(layer2.bias)) / n_train
+            )
+        model.add(layer2)
+    if len(layer_units) > 3:
+        layer3 = tf.keras.layers.Dense(
+            layer_units[3],
+            activation=layer_activations[3],
+            name=names[3],
+            kernel_regularizer=kernel_regularizers[3],
+            bias_regularizer=bias_regularizers[3],
+        )
+        if weight_prior:
+            layer3.add_loss(
+                lambda: -tf.reduce_sum(weight_prior.log_prob(layer3.kernel)) / n_train
+            )
+        if bias_prior:
+            layer3.add_loss(
+                lambda: -tf.reduce_sum(bias_prior.log_prob(layer3.bias)) / n_train
+            )
+        model.add(layer3)
+    if len(layer_units) > 4:
+        layer4 = tf.keras.layers.Dense(
+            layer_units[4],
+            activation=layer_activations[4],
+            name=names[4],
+            kernel_regularizer=kernel_regularizers[4],
+            bias_regularizer=bias_regularizers[4],
+        )
+        if weight_prior:
+            layer4.add_loss(
+                lambda: -tf.reduce_sum(weight_prior.log_prob(layer4.kernel)) / n_train
+            )
+        if bias_prior:
+            layer4.add_loss(
+                lambda: -tf.reduce_sum(bias_prior.log_prob(layer4.bias)) / n_train
+            )
+        model.add(layer4)
+    if len(layer_units) > 5:
+        raise ValueError("Larger then depth five networks are currently not supported.")
+
     return model
 
 

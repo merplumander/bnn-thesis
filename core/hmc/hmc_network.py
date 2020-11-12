@@ -6,7 +6,7 @@ from pathlib import Path
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from ..map import MapNetwork
+from ..map import MapDensityNetwork
 from ..network_utils import (
     _linspace_network_indices,
     activation_strings_to_activation_functions,
@@ -33,7 +33,7 @@ class HMCNetwork:
         transform_unconstrained_scale_factor=0.05,
         weight_priors=[tfd.Normal(0, 0.2)] * 3,
         bias_priors=[tfd.Normal(0, 0.2)] * 3,
-        std_prior=tfd.Normal(2, 0.01),  # currently does nothing
+        std_prior=tfd.InverseGamma(0.1, 0.1),
         sampler="nuts",
         n_chains=1,
         seed=0,
@@ -97,13 +97,21 @@ class HMCNetwork:
             return self._combined_samples
 
     def _initial_state_through_map_estimation(
-        self, x_train, y_train, learning_rate, batch_size, epochs, verbose=1
+        self,
+        x_train,
+        y_train,
+        initial_unconstrained_scale,
+        learning_rate,
+        batch_size,
+        epochs,
+        verbose=1,
     ):
-        print("_initial_state_through_map_estimation should use density network.")
-        net = MapNetwork(
+        net = MapDensityNetwork(
             input_shape=self.input_shape,
             layer_units=self.layer_units,
             layer_activations=self.layer_activations,
+            initial_unconstrained_scale=initial_unconstrained_scale,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
             learning_rate=learning_rate,
             seed=self.seed,
         )
@@ -115,23 +123,24 @@ class HMCNetwork:
             verbose=verbose,
         )
         initial_state = net.get_weights()
-        initial_state.append(
-            backtransform_constrained_scale(
-                net.sample_std, factor=self.transform_unconstrained_scale_factor
-            ),
-        )
+        # initial_state.append(
+        #     backtransform_constrained_scale(
+        #         net.noise_sigma, factor=self.transform_unconstrained_scale_factor
+        #     ),
+        # )
+        # print(net.noise_sigma)
         return initial_state
 
-    def log_prior(self, current_state):
+    def log_prior(self, weights, noise_std):
         log_prob = 0
         for w, b, w_prior, b_prior in zip(
-            current_state[::2],
-            current_state[1::2],
-            self.weight_priors,
-            self.bias_priors,
+            weights[::2], weights[1::2], self.weight_priors, self.bias_priors
         ):
             log_prob += tf.reduce_sum(w_prior.log_prob(w))
             log_prob += tf.reduce_sum(b_prior.log_prob(b))
+
+        # print(self.std_prior.log_prob(noise_std))
+        log_prob += tf.reduce_sum(self.std_prior.log_prob(noise_std))
         return log_prob
 
     def log_likelihood(self, weights, noise_std, x, y):
@@ -144,7 +153,7 @@ class HMCNetwork:
                 current_state[-1], factor=self.transform_unconstrained_scale_factor
             )
             weights = current_state[0:-1]  # includes biases
-            log_prob = self.log_prior(weights)
+            log_prob = self.log_prior(weights, noise_std)
             log_prob += self.log_likelihood(weights, noise_std, x, y)
             return log_prob
             # model = build_scratch_model(current_state, self.layer_activation_functions)
@@ -212,6 +221,7 @@ class HMCNetwork:
         learning_rate=0.01,
         batch_size=20,
         epochs=100,
+        initial_unconstrained_scale=0.1,
         verbose=1,
     ):
         self.num_leapfrog_steps = num_leapfrog_steps
@@ -219,6 +229,7 @@ class HMCNetwork:
             initial_state = self._initial_state_through_map_estimation(
                 x_train,
                 y_train,
+                initial_unconstrained_scale=initial_unconstrained_scale,
                 learning_rate=learning_rate,
                 batch_size=batch_size,
                 epochs=epochs,
@@ -378,9 +389,7 @@ class HMCNetwork:
 
     def predict(self, x_test, thinning=1):
         gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
-        cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
-        print(cat_probs.shape)
-        print(gaussians[0])
+        cat_probs = tf.ones((x_test.shape[0],) + (1, len(gaussians))) / len(gaussians)
         return self.predict_mixture_of_gaussians(cat_probs, gaussians)
 
     def predict_epistemic(self, x_test, thinning=1):
