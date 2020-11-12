@@ -70,7 +70,9 @@ class MapDensityEnsemble:
         if not isinstance(self.l2_bias_lambda, Iterable):
             self.l2_bias_lambda = [self.l2_bias_lambda] * self._n_networks
         if not isinstance(seed, Iterable):
-            delta = 100  # earliest seed that has almost the same trained models as 0.
+            delta = (
+                1000000  # earliest seed that has almost the same trained models as 0.
+            )
             seed = [i for i in range(seed, seed + self._n_networks * delta, delta)]
         self.names = names
         self.seed = seed

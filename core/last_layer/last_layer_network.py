@@ -11,6 +11,9 @@ from .bayesian_linear_regression import BayesianLinearRegression
 
 tfd = tfp.distributions
 
+# TODO: Add priors to ensemble and network. Has low priority, because I usually pass
+# pretrained weights anyway.
+
 
 class PostHocLastLayerBayesianEnsemble:
     def __init__(
@@ -46,7 +49,13 @@ class PostHocLastLayerBayesianEnsemble:
         self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
         if not isinstance(seed, Iterable):
-            seed = [seed + (i / self._n_networks) for i in range(self._n_networks)]
+            # # Puts all seeds in between the integer seed and the next integer.
+            # seed = [seed + (i / self._n_networks) for i in range(self._n_networks)]
+
+            delta = (
+                1000000  # earliest seed that has almost the same trained models as 0.
+            )
+            seed = [i for i in range(seed, seed + self._n_networks * delta, delta)]
         self.last_layer_prior = last_layer_prior
         self.last_layer_prior_params = last_layer_prior_params
         self.seed = seed
