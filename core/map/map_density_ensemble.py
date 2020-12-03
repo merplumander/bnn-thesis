@@ -28,7 +28,7 @@ class MapDensityEnsemble:
         transform_unconstrained_scale_factor=0.05,
         weight_prior=None,
         bias_prior=None,
-        scale_prior=None,
+        noise_var_prior=None,
         n_train=None,
         l2_weight_lambda=None,
         l2_bias_lambda=None,
@@ -58,7 +58,7 @@ class MapDensityEnsemble:
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.weight_prior = weight_prior
         self.bias_prior = bias_prior
-        self.scale_prior = scale_prior
+        self.noise_var_prior = noise_var_prior
         self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -90,7 +90,7 @@ class MapDensityEnsemble:
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
                 weight_prior=self.weight_prior,
                 bias_prior=self.bias_prior,
-                scale_prior=self.scale_prior,
+                noise_var_prior=self.noise_var_prior,
                 n_train=self.n_train,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
@@ -142,7 +142,7 @@ class MapDensityEnsemble:
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
                 weight_prior=self.weight_prior,
                 bias_prior=self.bias_prior,
-                scale_prior=self.scale_prior,
+                noise_var_prior=self.noise_var_prior,
                 n_train=self.n_train,
                 l2_weight_lambda=self.l2_weight_lambda[0],
                 l2_bias_lambda=self.l2_bias_lambda[0],
@@ -258,6 +258,31 @@ class MapDensityEnsemble:
     def predict(self, x_test):
         return self.predict_mixture_of_gaussians(x_test)
 
+    def predict_unnormalized_space(self, x_test, mean, scale):
+        """
+        Predict and transform the predictive distribution into the unnormalized space
+
+        Args:
+            mean (float):  Mean of the unnormalized training data. I.e. mean of the
+                           z-transformation that transformed the data into the normalized
+                           space.
+            scale (float): Scale of the unnormalized training data.
+        """
+        gaussians = self.predict_list_of_gaussians(x_test)
+        unnormalized_gaussians = []
+        for prediction in gaussians:
+            predictive_mean = prediction.mean()
+            predictive_std = prediction.stddev()
+            predictive_mean = (predictive_mean * scale) + mean
+            predictive_std = predictive_std * scale
+            unnormalized_gaussians.append(tfd.Normal(predictive_mean, predictive_std))
+        cat_probs = tf.ones((x_test.shape[0],) + (1, self.n_networks)) / len(
+            self.networks
+        )
+        return tfd.Mixture(
+            cat=tfd.Categorical(probs=cat_probs), components=unnormalized_gaussians
+        )
+
     def get_weights(self):
         networks_weights_list = []
         for network in self.networks:
@@ -289,7 +314,7 @@ class MapDensityNetwork:
         transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
         weight_prior=None,
         bias_prior=None,
-        scale_prior=None,
+        noise_var_prior=None,
         n_train=None,
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
@@ -310,7 +335,7 @@ class MapDensityNetwork:
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.weight_prior = weight_prior
         self.bias_prior = bias_prior
-        self.scale_prior = scale_prior
+        self.noise_var_prior = noise_var_prior
         self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -341,13 +366,14 @@ class MapDensityNetwork:
             layer = AddSigmaLayer(
                 self.initial_unconstrained_scale, name="aleatoric_noise"
             )
-            if self.scale_prior is not None:
+            if self.noise_var_prior is not None:
                 self.network.add_loss(
                     lambda: -tf.reduce_sum(
-                        self.scale_prior.log_prob(
+                        self.noise_var_prior.log_prob(
                             transform_unconstrained_scale(
                                 layer.sigma, self.transform_unconstrained_scale_factor
                             )
+                            ** 2
                         )
                     )
                     / self.n_train
