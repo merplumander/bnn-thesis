@@ -28,7 +28,7 @@ class MapDensityEnsemble:
         transform_unconstrained_scale_factor=0.05,
         weight_prior=None,
         bias_prior=None,
-        noise_var_prior=None,
+        noise_scale_prior=None,
         n_train=None,
         l2_weight_lambda=None,
         l2_bias_lambda=None,
@@ -58,7 +58,7 @@ class MapDensityEnsemble:
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.weight_prior = weight_prior
         self.bias_prior = bias_prior
-        self.noise_var_prior = noise_var_prior
+        self.noise_scale_prior = noise_scale_prior
         self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -90,7 +90,7 @@ class MapDensityEnsemble:
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
                 weight_prior=self.weight_prior,
                 bias_prior=self.bias_prior,
-                noise_var_prior=self.noise_var_prior,
+                noise_scale_prior=self.noise_scale_prior,
                 n_train=self.n_train,
                 l2_weight_lambda=l2_weight_lambda,
                 l2_bias_lambda=l2_bias_lambda,
@@ -142,7 +142,7 @@ class MapDensityEnsemble:
                 transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
                 weight_prior=self.weight_prior,
                 bias_prior=self.bias_prior,
-                noise_var_prior=self.noise_var_prior,
+                noise_scale_prior=self.noise_scale_prior,
                 n_train=self.n_train,
                 l2_weight_lambda=self.l2_weight_lambda[0],
                 l2_bias_lambda=self.l2_bias_lambda[0],
@@ -314,7 +314,7 @@ class MapDensityNetwork:
         transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
         weight_prior=None,
         bias_prior=None,
-        noise_var_prior=None,
+        noise_scale_prior=None,
         n_train=None,
         l2_weight_lambda=None,  # float or list of floats
         l2_bias_lambda=None,
@@ -328,6 +328,14 @@ class MapDensityNetwork:
             assert layer_units[-1] == 1
         else:
             assert layer_units[-1] == 2
+        # This is a very typical mistake that throws a quite cryptically error message.
+        # So it is better to catch it with this assertion.
+        if (
+            weight_prior is not None
+            or bias_prior is not None
+            or noise_scale_prior is not None
+        ):
+            assert n_train is not None
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
@@ -335,7 +343,7 @@ class MapDensityNetwork:
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.weight_prior = weight_prior
         self.bias_prior = bias_prior
-        self.noise_var_prior = noise_var_prior
+        self.noise_scale_prior = noise_scale_prior
         self.n_train = n_train
         self.l2_weight_lambda = l2_weight_lambda
         self.l2_bias_lambda = l2_bias_lambda
@@ -366,14 +374,13 @@ class MapDensityNetwork:
             layer = AddSigmaLayer(
                 self.initial_unconstrained_scale, name="aleatoric_noise"
             )
-            if self.noise_var_prior is not None:
+            if self.noise_scale_prior is not None:
                 self.network.add_loss(
                     lambda: -tf.reduce_sum(
-                        self.noise_var_prior.log_prob(
+                        self.noise_scale_prior.log_prob(
                             transform_unconstrained_scale(
                                 layer.sigma, self.transform_unconstrained_scale_factor
                             )
-                            ** 2
                         )
                     )
                     / self.n_train
@@ -499,6 +506,10 @@ class MapDensityNetwork:
             verbose=verbose,
         )
         self.history = history
+        if tf.math.reduce_any(tf.math.is_inf(self.history.history["loss"])):
+            raise RuntimeError(
+                "Loss is infinite, possibly because the prior assigns probability 0 to some values."
+            )
         self.total_epochs = len(history.history["loss"])
         # if restore_best_weights is True, then the number of total epochs needs to be
         # adjusted by the patience
