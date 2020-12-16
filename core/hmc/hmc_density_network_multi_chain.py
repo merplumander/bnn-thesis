@@ -1,4 +1,4 @@
-# with lots of inspiration from https://janosh.io/blog/hmc-bnn
+# with inspiration from https://janosh.io/blog/hmc-bnn
 import pickle
 from collections import Iterable
 from pathlib import Path
@@ -33,7 +33,6 @@ class HMCDensityNetwork:
         step_size=0.01,
         num_leapfrog_steps=100,  # only relevant for HMC
         max_tree_depth=10,  # only relevant for NUTS
-        n_chains=1,
         seed=0,
     ):
         """
@@ -59,14 +58,12 @@ class HMCDensityNetwork:
         self.network_prior = network_prior
         self.noise_scale_prior = noise_scale_prior
         self.sampler = sampler
+        self._step_size_adapter = step_size_adapter
         self.num_burnin_steps = num_burnin_steps
         self.step_size = step_size
         self.num_leapfrog_steps = num_leapfrog_steps
         self.max_tree_depth = max_tree_depth
-        self.n_chains = n_chains
         self.seed = seed
-
-        tf.random.set_seed(self.seed)
 
         self.layer_activation_functions = activation_strings_to_activation_functions(
             self.layer_activations
@@ -75,17 +72,66 @@ class HMCDensityNetwork:
         self.step_size_adapter = {
             "simple": tfp.mcmc.SimpleStepSizeAdaptation,
             "dual_averaging": tfp.mcmc.DualAveragingStepSizeAdaptation,
-        }[step_size_adapter]
+        }[self._step_size_adapter]
 
         self._samples = None
+        self._chain = None
+        self._trace = None
+        self.chain_mask = None
+        self.kernel_results = None
+
+    @property
+    def n_chains(self):
+        return self._chain[0].shape[1]
+
+    @property
+    def n_used_chains(self):
+        return self.samples[0].shape[1]
+
+    @property
+    def n_samples(self):
+        return self.samples[0].shape[0]
+
+    @property
+    def _non_burnin_samples(self):
+        return tf.nest.map_structure(lambda x: x[self.num_burnin_steps :], self._chain)
+
+    def _apply_chain_mask(self, samples):
+        if self.chain_mask is not None:
+            samples = tf.nest.map_structure(
+                lambda x: tf.boolean_mask(x, self.chain_mask, axis=1), samples
+            )
+        return samples
+
+    def _assign_used_samples(self):
+        _samples = self._non_burnin_samples
+        self._samples = self._apply_chain_mask(_samples)
 
     @property
     def samples(self):
         if self._samples is None:
-            self._samples = tf.nest.map_structure(
-                lambda x: x[self.num_burnin_steps :], self.chain
-            )
+            self._assign_used_samples()
         return self._samples
+
+    @property
+    def trace(self):
+        trace = tf.nest.map_structure(lambda x: x[self.num_burnin_steps :], self._trace)
+        trace = self._apply_chain_mask(trace)
+        return trace
+
+    def mask_chains(self, chain_mask):
+        """
+        Supplies a mask that is used to mask out some chains e.g. because they were
+        divergent.
+
+        Args:
+            chain_mask (boolean tensor): Boolean tensor with shape (n_chains).
+        """
+        self.chain_mask = chain_mask
+        self._assign_used_samples()
+
+    def thinned_samples(self, thinning):
+        return tf.nest.map_structure(lambda x: x[::thinning], self.samples)
 
     def log_prior(self, weights, unconstrained_noise_scale):
         log_prob = 0
@@ -138,7 +184,7 @@ class HMCDensityNetwork:
 
     @tf.function  # (experimental_compile=True)
     def _sample_chain(
-        self, num_burnin_steps, num_results, current_state, previous_kernel_results=None
+        self, num_burnin_steps, num_results, current_state, adaptive_kernel
     ):
         if self.sampler == "nuts":
             trace_fn = lambda _, pkr: [
@@ -150,144 +196,181 @@ class HMCDensityNetwork:
         chain, trace, final_kernel_results = tfp.mcmc.sample_chain(
             num_results=num_burnin_steps + num_results,
             current_state=current_state,
-            previous_kernel_results=previous_kernel_results,
-            kernel=self.adaptive_kernel,
+            previous_kernel_results=self.kernel_results,
+            kernel=adaptive_kernel,
             return_final_kernel_results=True,
             trace_fn=trace_fn,
+            seed=self.seed,
         )
         return chain, trace, final_kernel_results
 
     def fit(self, x_train, y_train, current_state=None, num_results=5000, resume=False):
-        assert current_state[0].shape[0] == self.n_chains
         target_log_prob_fn = self._target_log_prob_fn_factory(x_train, y_train)
+        num_burnin_steps = 0 if resume else self.num_burnin_steps
 
-        if resume:
-            num_burnin_steps = 0
-            # initial_states = [
-            #     list(tf.nest.map_structure(lambda param: param[-1], samples))
-            #     for samples in self.samples
-            # ]
-            # previous_kernel_results = self.final_kernel_results
-
-            # not adapted yet!
-            current_state = tf.nest.map_structure(lambda x: x[-1], self.chain)
-        else:
-            num_burnin_steps = self.num_burnin_steps
-            if self.sampler == "nuts":
-                kernel = tfp.mcmc.NoUTurnSampler(
-                    target_log_prob_fn,
-                    max_tree_depth=self.max_tree_depth,
-                    step_size=self.step_size,
-                )
-                self.adaptive_kernel = self.step_size_adapter(
-                    kernel,
-                    num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                    step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
-                        step_size=new_step_size
-                    ),
-                    step_size_getter_fn=lambda pkr: pkr.step_size,
-                    log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
-                )
-            elif self.sampler == "hmc":
-                kernel = tfp.mcmc.HamiltonianMonteCarlo(
-                    target_log_prob_fn,
-                    step_size=self.step_size,
-                    num_leapfrog_steps=self.num_leapfrog_steps,
-                )
-                self.adaptive_kernel = self.step_size_adapter(
-                    kernel, num_adaptation_steps=int(self.num_burnin_steps * 0.8)
-                )
-
-            self.kernel_results = self.adaptive_kernel.bootstrap_results(current_state)
-
-            chain, trace, self.kernel_results = self._sample_chain(
-                num_burnin_steps=num_burnin_steps,
-                num_results=num_results,
-                current_state=current_state,
-                previous_kernel_results=self.kernel_results,
+        if self.sampler == "nuts":
+            kernel = tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn,
+                max_tree_depth=self.max_tree_depth,
+                step_size=self.step_size,
             )
-            if not resume:
-                self.chain = chain
-                self.trace = trace
+            adaptive_kernel = self.step_size_adapter(
+                kernel,
+                num_adaptation_steps=int(num_burnin_steps * 0.8),
+                step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
+                    step_size=new_step_size
+                ),
+                step_size_getter_fn=lambda pkr: pkr.step_size,
+                log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
+            )
+        elif self.sampler == "hmc":
+            kernel = tfp.mcmc.HamiltonianMonteCarlo(
+                target_log_prob_fn,
+                step_size=self.step_size,
+                num_leapfrog_steps=self.num_leapfrog_steps,
+            )
+            adaptive_kernel = self.step_size_adapter(
+                kernel, num_adaptation_steps=int(num_burnin_steps * 0.8)
+            )
+        if resume:
+            current_state = tf.nest.map_structure(lambda x: x[-1], self._chain)
+        else:
+            self.kernel_results = adaptive_kernel.bootstrap_results(current_state)
 
-            else:
-                self.chain = tf.nest.map_structure(
-                    lambda *parts: tf.concat(parts, axis=0), *[self.chain, chain]
-                )
-                self.trace = tf.nest.map_structure(
-                    lambda *parts: tf.concat(parts, axis=0), *[self.trace, trace]
-                )
+        chain, trace, self.kernel_results = self._sample_chain(
+            num_burnin_steps=num_burnin_steps,
+            num_results=num_results,
+            current_state=current_state,
+            adaptive_kernel=adaptive_kernel,
+        )
+        if not resume:
+            self._chain = chain
+            self._trace = trace
+
+        else:
+            self._chain = tf.nest.map_structure(
+                lambda *parts: tf.concat(parts, axis=0), *[self._chain, chain]
+            )
+            self._trace = tf.nest.map_structure(
+                lambda *parts: tf.concat(parts, axis=0), *[self._trace, trace]
+            )
+        # After changing self._chain we always need to call _assign_used_samples to ensure that all relevant samples from _chain show up in self.samples.
+        self._assign_used_samples()
         return self
 
     def potential_scale_reduction(self):
+        print(self.samples[0].shape)
         return tfp.mcmc.potential_scale_reduction(self.samples)
 
-    ## OLD ##
-    # def ess(self, **kwargs):
-    #     """
-    #     Estimate effective sample size of Markov chain(s).
-    #     """
-    #     mean_esss = []
-    #     esss = []
-    #     for i in range(self.n_chains):
-    #         ess = tfp.mcmc.effective_sample_size(self.samples[i], **kwargs)
-    #         esss.append(ess)
-    #         flat_ess = tf.concat([tf.reshape(t, (-1)) for t in ess], axis=0)
-    #         mean_ess = tf.reduce_mean(flat_ess)
-    #         mean_esss.append(mean_ess)
-    #         print(tf.math.reduce_min(flat_ess))
-    #         print(tf.math.reduce_max(flat_ess))
-    #
-    #     return esss, mean_esss
-    #
-    ## OLD ##
-    # def acceptance_ratio(self):
-    #     acceptance_ratios = []
-    #     for i in range(self.n_chains):
-    #         acceptance_ratios.append(
-    #             tf.reduce_sum(tf.cast(self.trace[i][0], tf.float32))
-    #             / len(self.trace[i][0])
-    #         )
-    #     return tf.convert_to_tensor(acceptance_ratios)
-    #
-    ## OLD ##
-    # def leapfrog_steps_taken(self):
-    #     """
-    #     Returns the means and standard deviations of the leapfrog steps taken of the
-    #     individual chains.
-    #     """
-    #     if self.sampler == "nuts":
-    #         means = []
-    #         stds = []
-    #         for i in range(self.n_chains):
-    #             means.append(tf.reduce_mean(self.trace[i][1]))
-    #             stds.append(tf.math.reduce_std(tf.cast(self.trace[i][1], tf.float32)))
-    #         return tf.convert_to_tensor(means), tf.convert_to_tensor(stds)
-    #     else:
-    #         return self.num_leapfrog_steps, 0
-    #
+    def effective_sample_size(self, thinning=1):
+        samples = self.thinned_samples(thinning=thinning)
+        cross_chain_dims = None if self.n_used_chains == 1 else [1] * len(samples)
+        ess = tfp.mcmc.effective_sample_size(samples, cross_chain_dims=cross_chain_dims)
+        return ess
 
-    def predict(self, x):
-        return self.predict_mixture_of_gaussians(x)
+    def acceptance_ratio(self):
+        return tf.reduce_mean(tf.cast(self.trace[0], tf.float32), axis=0)
 
-    def predict_mixture_of_gaussians(self, x):
-        n_samples = self.samples[0].shape[0]
+    def leapfrog_steps_taken(self):
+        """
+        Returns the means and standard deviations of the leapfrog steps taken of the
+        individual chains.
+        """
+        if self.sampler == "nuts":
+            mean = tf.reduce_mean(tf.cast(self.trace[1], "float32"), axis=0)
+            std = tf.math.reduce_std(tf.cast(self.trace[1], "float32"), axis=0)
+            return mean, std
+        else:
+            return self.num_leapfrog_steps, 0
+
+    def _base_predict(self, x, thinning):
+        """
+        Produces a predictive normal distribution for every parameter sample.
+
+        Returns:
+            prediction: IndependentNormal with event shape of x.shape and batch shape of
+                        (n_samples / thinning, n_chains)
+        """
+        samples = self.thinned_samples(thinning=thinning)
         model = build_scratch_density_model(
-            self.samples[:-1],
+            samples[:-1],
             self.layer_activation_functions,
             self.transform_unconstrained_scale_factor,
-            self.samples[-1],
+            samples[-1],
         )
         prediction = model(x)
+        return prediction
+
+    def predict(self, x, thinning=1):
+        """
+        Produces the networks prediction as a mixture of the individual predictions of
+        every parameter sample in every chain (possibly skipping some dependent on
+        thinning).
+
+        Args:
+            x (numpy array or tensorflow tensor): The locations at which to predict.
+                                                  Shape (n_samples, n_features)
+            thinning (int):                       Parameter to control how many samples
+                                                  to skip. E.g.
+                                                  thinning=1 => use all samples
+                                                  thinning=10 => use every tenth sample
+
+        Returns:
+            prediction: MixtureSameFamily of IndependentNormals with event shape of
+                        x.shape and batch shape of []
+        """
+        return self.predict_mixture_of_gaussians(x, thinning=thinning)
+
+    def predict_mixture_of_gaussians(self, x, thinning=1):
+        prediction = self._base_predict(x, thinning=thinning)
+        n_samples = prediction.batch_shape[0]
         prediction = tfp.distributions.BatchReshape(
-            prediction, (n_samples * self.n_chains,)
+            prediction, (n_samples * self.n_used_chains,)
         )
 
         cat = tfp.distributions.Categorical(
-            probs=tf.ones((n_samples * self.n_chains,)) / (n_samples * self.n_chains)
+            probs=tf.ones((n_samples * self.n_used_chains,))
+            / (n_samples * self.n_used_chains)
         )
         predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
         return predictive_mixture
+
+    def predict_chains(self, x, thinning=1):
+        prediction = self._base_predict(x, thinning=thinning)
+        n_samples = prediction.batch_shape[0]
+        prediction = tfp.distributions.BatchReshape(
+            prediction, (self.n_used_chains, n_samples)
+        )
+
+        cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
+        predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
+        return predictive_mixture
+
+    def predict_individual_chain(self, x, i_chain, thinning=1):
+        samples = self.thinned_samples(thinning=thinning)
+        n_samples = samples[0].shape[0]
+        samples = tf.nest.map_structure(lambda x: x[:, i_chain], samples)
+        model = build_scratch_density_model(
+            samples[:-1],
+            self.layer_activation_functions,
+            self.transform_unconstrained_scale_factor,
+            samples[-1],
+        )
+        prediction = model(x)
+        cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
+        predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
+        return predictive_mixture
+
+    def predict_random_sample(self, x, seed=0):
+        tf.random.set_seed(seed)
+        i_chain = tf.random.uniform(
+            (), maxval=self.n_used_chains, dtype=tf.dtypes.int32, seed=seed
+        )
+        i_sample = tf.random.uniform(
+            (), maxval=self.n_samples, dtype=tf.dtypes.int32, seed=seed
+        )
+        sample = tf.nest.map_structure(lambda x: x[i_sample, i_chain], self.samples)
+        return self.predict_from_sample_parameters(x, sample)
 
     ## OLD ##
     # def predict_list_of_gaussians(self, x_test, thinning=1, n_predictions=None):
@@ -373,7 +456,7 @@ class HMCDensityNetwork:
     #     return predictive_distributions
 
     # very useful for debugging
-    def predict_from_sample_parameters(self, x_test, sample_parameters):
+    def predict_from_sample_parameters(self, x, sample_parameters):
         """
         sample_parameters is a list of tensors or arrays specifying the network
         parameters.
@@ -386,7 +469,7 @@ class HMCDensityNetwork:
             self.transform_unconstrained_scale_factor,
             unconstrained_noise_scale=unconstrained_noise_scale,
         )
-        prediction = model(x_test)
+        prediction = model(x)
         return prediction
 
     ## OLD ##
@@ -407,14 +490,125 @@ class HMCDensityNetwork:
     #         predictive_distributions.append(prediction)
     #     return predictive_distributions
 
-    ## OLD ##
-    # def save(self, save_path):
-    #     with open(save_path, "wb") as f:
-    #         pickle.dump(self, f, -1)
+    def save(self, save_path):
+        init_dict = dict(
+            input_shape=self.input_shape,
+            layer_units=self.layer_units,
+            layer_activations=self.layer_activations,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+            network_prior=self.network_prior,
+            noise_scale_prior=self.noise_scale_prior,
+            sampler=self.sampler,
+            num_burnin_steps=self.num_burnin_steps,
+            step_size=self.step_size,
+            num_leapfrog_steps=self.num_leapfrog_steps,
+            max_tree_depth=self.max_tree_depth,
+            seed=self.seed,
+        )
+        fit_dict = dict(
+            _samples=self._samples,
+            _chain=self._chain,
+            _trace=self._trace,
+            chain_mask=self.chain_mask,
+            kernel_results=self.kernel_results,
+        )
+        dic = dict(init=init_dict, fit=fit_dict)
+        with open(save_path, "wb") as f:
+            pickle.dump(dic, f, -1)
 
 
-## OLD ##
-# def hmc_network_from_save_path(save_path):
-#     with open(save_path, "rb") as f:
-#         hmc_net = pickle.load(f)
-#     return hmc_net
+def hmc_density_network_from_save_path(save_path):
+    with open(save_path, "rb") as f:
+        dic = pickle.load(f)
+    hmc_net = HMCDensityNetwork(**dic["init"])
+    fit_d = dic["fit"]
+    hmc_net._samples = fit_d["_samples"]
+    hmc_net._chain = fit_d["_chain"]
+    hmc_net._trace = fit_d["_trace"]
+    hmc_net.chain_mask = fit_d["chain_mask"]
+    hmc_net.kernel_results = fit_d["kernel_results"]
+    return hmc_net
+
+
+def undo_masking(hmc_net):
+    # Undo masking that was done so far
+    undo_mask = tf.cast(tf.ones((hmc_net.n_chains,)), "bool")
+    hmc_net.mask_chains(undo_mask)
+    return hmc_net
+
+
+def mask_nonsense_chains(
+    hmc_net,
+    median_scale_cutter=None,
+    lowest_acceptance_ratio=None,
+    highest_acceptance_ratio=None,
+    x_train=None,
+    y_train=None,
+):
+    undo_masking(hmc_net)
+
+    if median_scale_cutter is not None:
+        # Mask by nonsense scales
+        scales = transform_unconstrained_scale(
+            hmc_net.samples[-1], factor=hmc_net.transform_unconstrained_scale_factor
+        )
+        median_scale_per_chain = tfp.stats.percentile(
+            scales, 50.0, interpolation="midpoint", axis=(0, 2, 3)
+        )
+        scale_mask = tf.greater_equal(median_scale_cutter, median_scale_per_chain)
+        chain_mask = scale_mask
+        print(
+            "Chains removed because of nonsense scales:",
+            hmc_net.n_chains
+            - tf.reduce_sum(tf.cast(scale_mask, dtype="int32")).numpy(),
+        )
+        print(
+            "Rejected median scales:",
+            median_scale_per_chain[tf.math.logical_not(scale_mask)].numpy(),
+        )
+        print()
+
+    if lowest_acceptance_ratio is not None:
+        # Mask by acceptance ratios
+        acceptance_ratio = hmc_net.acceptance_ratio()
+        high_enough = tf.less_equal(lowest_acceptance_ratio, acceptance_ratio)
+        low_enough = tf.greater_equal(highest_acceptance_ratio, acceptance_ratio)
+        acceptance_mask = tf.math.logical_and(high_enough, low_enough)
+        chain_mask = tf.math.logical_and(chain_mask, acceptance_mask)
+        print(
+            "Chains removed because of nonsense acceptance ratio:",
+            hmc_net.n_chains
+            - tf.reduce_sum(tf.cast(acceptance_mask, dtype="int32")).numpy(),
+        )
+        print(
+            "Rejected acceptance ratios:",
+            acceptance_ratio[tf.math.logical_not(acceptance_mask)].numpy(),
+        )
+        print()
+
+    if x_train is not None:
+        log_posterior = hmc_net._target_log_prob_fn_factory(x_train, y_train)
+        log_posteriors = log_posterior(
+            *tf.nest.map_structure(lambda x: x, hmc_net.samples)
+        )
+        largest_min = tf.reduce_max(tf.reduce_min(log_posteriors, axis=0))
+        highest_log_posterior_by_chain = tf.reduce_max(log_posteriors, axis=0)
+        highest_log_posterior = tf.reduce_max(log_posteriors)
+        posterior_mask = tf.greater(
+            highest_log_posterior_by_chain, largest_min - tf.math.log(1.0)
+        )
+        chain_mask = tf.math.logical_and(chain_mask, posterior_mask)
+        print(
+            "Chains removed because all samples had very low posterior probability:",
+            hmc_net.n_chains
+            - tf.reduce_sum(tf.cast(posterior_mask, dtype="int32")).numpy(),
+        )
+        print("The highest log posterior:", highest_log_posterior.numpy())
+        print("The highest minimal log posterior over chains:", largest_min.numpy())
+        print(
+            "The highest log posteriors of the removed chains:",
+            highest_log_posterior_by_chain[tf.math.logical_not(posterior_mask)].numpy(),
+        )
+
+    hmc_net.mask_chains(chain_mask)
+    return hmc_net

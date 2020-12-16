@@ -102,8 +102,7 @@ def plot_moment_matched_predictive_normal_distribution(
         plot_validation_data(x_validation, y_validation, ax=ax)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    if y_lim:
-        ax.set_ylim(y_lim)
+    ax.set_ylim(y_lim)
     ax.legend()
     if no_ticks:
         ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
@@ -123,9 +122,11 @@ def plot_distribution_samples(
     fig=None,
     ax=None,
     show_hdr=True,
+    x_lim=None,
     y_lim=None,
     seaborn_pallet_starting_index=0,
     labels=[],
+    no_ticks=True,
     save_path=None,
 ):
     if fig is None:
@@ -153,9 +154,11 @@ def plot_distribution_samples(
         plot_validation_data(x_validation, y_validation, ax=ax)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    if y_lim:
-        ax.set_ylim(y_lim)
+    ax.set_xlim(x_lim)
+    ax.set_ylim(y_lim)
     ax.legend()
+    if no_ticks:
+        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
@@ -587,6 +590,7 @@ def plot_uci_single_benchmark(
         ax.legend(**legend_kwargs)
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
+    return ax.get_legend_handles_labels()
 
 
 def plot_uci_ensemble_size_benchmark(

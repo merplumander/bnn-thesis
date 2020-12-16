@@ -17,6 +17,7 @@ thermo
 figures
 logs
 .save_data
+.hmc_save_dir
 notebooks/experimental
 test.py
 fBBN_GP_Posterior.md

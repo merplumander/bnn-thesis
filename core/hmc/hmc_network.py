@@ -17,6 +17,10 @@ from ..network_utils import (
 
 tfd = tfp.distributions
 
+################################################################################
+# Deprecated
+################################################################################
+
 
 class HMCNetwork:
     def __init__(
@@ -199,7 +203,7 @@ class HMCNetwork:
 
     @tf.function  # (experimental_compile=True)
     def _sample_chain(
-        self, num_burnin_steps, num_results, current_state, previous_kernel_results,
+        self, num_burnin_steps, num_results, current_state, previous_kernel_results
     ):
         if self.sampler == "nuts":
             trace_fn = lambda _, pkr: [

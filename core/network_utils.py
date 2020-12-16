@@ -69,6 +69,51 @@ class AddSigmaLayer(tf.keras.layers.Layer):
     #     return config
 
 
+def make_independent_gaussian_network_prior(
+    input_shape, layer_units, loc=0.0, scale=1.0
+):
+    """
+    Takes the loc and scale of a Gaussian distribution and produces a list of
+    independent multi-D Gaussians that define a prior over the whole network.
+    Intended to be used for HMCDensityNetwork.
+    """
+    full_shape = input_shape + layer_units
+    network_prior = []
+    for i in range(len(full_shape) - 1):
+        weight_prior = tfd.Independent(
+            tfd.Normal(
+                loc=loc, scale=tf.fill((full_shape[i], full_shape[i + 1]), scale)
+            ),
+            reinterpreted_batch_ndims=2,
+        )
+        bias_prior = tfd.Independent(
+            tfd.Normal(loc=loc, scale=tf.fill((1, full_shape[i + 1]), scale)),
+            reinterpreted_batch_ndims=2,
+        )
+        network_prior.append(weight_prior)
+        network_prior.append(bias_prior)
+    return network_prior
+
+
+def batch_repeat_matrix(m, repeats):
+    """
+    Adds leading dimension to a matrix and repeats matrix along this dimension.
+    If m is a 1D vector, then an additional empty middle dimension is added.
+    Example:
+        m.shape: (a, b)
+            Returns tensor with shape (repeats, a, b)
+        m.shape: (a)
+            Returns tensor with shape (repeats, 1, a)
+    This is especially useful for getting the weights of a MapDensityNetwork to be
+    repeated such that multiple HMC chains can be run starting there.
+    """
+    m = tf.expand_dims(m, axis=0)
+    m = tf.repeat(m, repeats=repeats, axis=0)
+    if len(m.shape) == 2:
+        m = tf.expand_dims(m, axis=1)
+    return m
+
+
 def _linspace_network_indices(n_networks, n_predictions):
     """
     Function to compute the indices of the networks or samples to use for prediction
@@ -153,34 +198,9 @@ def dense_layer(inputs, w, b, activation=tf.identity):
     return activation(tf.matmul(inputs, w) + b)
 
 
-def build_scratch_density_model(weights_list, layer_activation_functions):
-    """
-    Building a tensorflow model from scratch (i.e. without keras and tf.layers).
-    This is needed for HMC, since sampling cannot deal with keras objects
-    for some reason. Probably this way it is also faster, since keras layers have a lot
-    of additional functionality.
-
-    Args:
-        weights_list (list):      Flat list of weights and biases of the network
-                                  (must have an even number of elements)
-        layer_activations (list): List of tensorflow activation functions
-                                  (must have half as many elements as weights_list)
-    """
-
-    def model(X):
-        for w, b, activation in zip(
-            weights_list[::2], weights_list[1::2], layer_activation_functions
-        ):
-            X = dense_layer(X, w, b, activation)
-        return tfd.Normal(
-            loc=X[..., :1], scale=transform_unconstrained_scale(X[..., 1:])
-        )
-
-    return model
-
-
 def build_scratch_model(weights_list, noise_std, layer_activation_functions):
     """
+    Deprecated. Only to be used with deprecated HMCNetwork.
     Building a tensorflow model from scratch (i.e. without keras and tf.layers).
     This is needed for HMC, since sampling cannot deal with keras objects
     for some reason. Probably this way it is also faster, since keras layers have a lot
@@ -202,6 +222,57 @@ def build_scratch_model(weights_list, noise_std, layer_activation_functions):
         # print("output", X[..., :1].shape)
         # print("noise", noise_std.shape)
         return tfd.Normal(loc=X[..., :1], scale=noise_std)
+
+    return model
+
+
+def build_scratch_density_model(
+    weights_list,
+    layer_activation_functions,
+    transform_unconstrained_scale_factor,
+    unconstrained_noise_scale=None,
+):
+    """
+    Building a tensorflow model from scratch (i.e. without keras and tf.layers).
+    This is needed for HMC, since sampling cannot deal with keras objects
+    for some reason. Probably this way it is also faster, since keras layers have a lot
+    of additional functionality.
+
+    Args:
+        weights_list (list):      Flat list of weights and biases of the network
+                                  (must have an even number of elements)
+        layer_activations (list): List of tensorflow activation functions
+                                  (must have half as many elements as weights_list)
+        transform_unconstrained_scale_factor (float): Factor for the scale
+                                                      transformation
+        unconstrained_noise_scale (float, optional) : Unconstrained noise standard
+                                                      deviation. If not passed it is
+                                                      assumed that the network has two
+                                                      outputs and the second one models
+                                                      the unconstrained_noise_scale.
+    """
+
+    def model(X):
+        """
+        X must be a two dimensional numpy array or tensorflow tensor with shape
+        (n_samples, n_features).
+        """
+        for w, b, activation in zip(
+            weights_list[::2], weights_list[1::2], layer_activation_functions
+        ):
+            X = dense_layer(X, w, b, activation)
+
+        if unconstrained_noise_scale is None:
+            noise_scale = transform_unconstrained_scale(
+                X[..., 1:], factor=transform_unconstrained_scale_factor
+            )
+        else:
+            noise_scale = transform_unconstrained_scale(
+                unconstrained_noise_scale, factor=transform_unconstrained_scale_factor
+            )
+        return tfd.Independent(
+            tfd.Normal(loc=X[..., :1], scale=noise_scale), reinterpreted_batch_ndims=2
+        )
 
     return model
 
@@ -349,18 +420,6 @@ def build_keras_model(
         raise ValueError("Larger then depth five networks are currently not supported.")
 
     return model
-
-
-# @tf.keras.utils.register_keras_serializable(package="Custom", name="l2")
-# class PriorRegularizer(tf.keras.regularizers.Regularizer):
-#     def __init__(self, prior_distribution):
-#         self.prior_distribution = prior_distribution
-#
-#     def __call__(self, weight_matrix):
-#         return tf.math.reduce_sum(self.prior_distribution.log_prob(weight_matrix))
-#
-#     def get_config(self):
-#         return {"prior_distribution": self.prior_distribution}
 
 
 def train_ml_model(
