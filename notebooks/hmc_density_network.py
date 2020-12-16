@@ -24,6 +24,11 @@ from data.toy_regression import (
 
 tfd = tfp.distributions
 
+################################################################################
+# Deprecated
+################################################################################
+
+
 save_dir = ".save_data/"
 save_dir = Path(save_dir)
 save_dir.mkdir(parents=True, exist_ok=True)

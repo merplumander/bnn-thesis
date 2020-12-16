@@ -23,9 +23,15 @@ from data.toy_regression import ground_truth_x3_function, x3_gap_data
 
 tfd = tfp.distributions
 
+################################################################################
+# Deprecated
+################################################################################
+
+
 figure_dir = "figures/temp"
 figure_dir = Path(figure_dir)
 figure_dir.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 data_seed = 0
