@@ -25,6 +25,7 @@ from core.plotting_utils import (
     plot_moment_matched_predictive_normal_distribution,
 )
 from core.preprocessing import StandardPreprocessor
+from core.sanity_checks import check_posterior_equivalence
 from data.toy_regression import (
     create_split_periodic_data_heteroscedastic,
     ground_truth_periodic_function,
@@ -160,6 +161,14 @@ plot_distribution_samples(
     y_train=y_train,
     y_ground_truth=y_ground_truth,
 )
+
+
+# %% markdown
+# As a sanity check we can assert the posterior equivalence between a map network and an
+# hmc network. This checks that the prior and likelihood are equivalent.
+
+# %%
+assert check_posterior_equivalence(net, hmc_net, x_train, y_train)
 
 
 # %%
