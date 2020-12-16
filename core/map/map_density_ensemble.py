@@ -554,11 +554,14 @@ class MapDensityNetwork:
 
     def get_weights(self):
         weights = self.network.get_weights()
-        weights[-1] = weights[-1][0]
+        if self.initial_unconstrained_scale is not None:
+            # Then the last element is not a bias vector but the noise sigma
+            weights[-1] = weights[-1][0]
         return weights
 
     def set_weights(self, weights_list):
-        weights_list[-1] = weights_list[-1].reshape(1, 1)
+        if self.initial_unconstrained_scale is not None:
+            weights_list[-1] = weights_list[-1].reshape(1, 1)
         self.network.set_weights(weights_list)
 
     def save(self, save_path):

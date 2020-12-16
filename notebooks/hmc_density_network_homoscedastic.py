@@ -127,9 +127,10 @@ n_chains = 128
 num_burnin_steps = 500
 num_results = 100
 
+
 _step_size = 0.01
 step_size = [np.ones((n_chains, 1, 1)) * _step_size] * (
-    len(layer_units) * 2 + 1
+    len(layer_units) * 2 + 1  # + 1 for the noise sigma "layer"
 )  # Individual step sizes for all chains and all layers
 # step_size = np.ones((n_chains, 1, 1)) * _step_size # Individual step sizes for all chains
 hmc_net = HMCDensityNetwork(
@@ -298,12 +299,12 @@ plot_distribution_samples(
 # And we can also get predictions from random samples of the chains
 
 # %%
-chain_predictions = [
+sample_predictions = [
     hmc_net.predict_random_sample(x_plot, seed=seed) for seed in [0, 1, 3, 4]
 ]
 plot_distribution_samples(
     x_plot=x_plot,
-    distribution_samples=chain_predictions,
+    distribution_samples=sample_predictions,
     x_train=x_train,
     y_train=y_train,
     y_ground_truth=y_ground_truth,

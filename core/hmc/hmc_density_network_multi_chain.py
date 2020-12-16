@@ -36,21 +36,27 @@ class HMCDensityNetwork:
         seed=0,
     ):
         """
-        A neural network whose posterior distribution parameters are estimated by HMC.
-        Each individual network sample models a function and a homoscedastic standard
-        deviation is put around that function in the form of a Normal distribution.
-        The class can run several MCMC chains in parallel.
+        A Bayesian neural network whose posterior distribution parameters are estimated
+        by HMC. Each individual network sample models a function and a homoscedastic or
+        heteroscedasticity standard deviation around that function in the form of a
+        Normal distribution. Whether the noise is modelled heteroscedastically or
+        homoscedastically is controlled by layer_units and noise_scale_prior. The class
+        can very efficiently run several MCMC chains in parallel. Often running 128
+        chains in parallel is faster than running one chain twice in a row.
 
         Params:
-            weight_priors (list of tfp distributions):
-                Must have same length as layer_units. Each distribution must be scalar
-                and is applied to the respective layer weights.
-                In some future version, it might be possible to pass a distribution
-                with the right shape.
-            bias_priors (list of tfp distributions):
-                Same as weight_prior but for biases.
-            noise_scale_prior
+            network_prior:
+                    list of tfp distributions with event shapes fiiting the shapes of
+                    the weight and bias vectors.
+            noise_scale_prior (optional):
+                    tfp distribution that defines a prior for the noise the scale.
+                    If this is not provided, layer_units[-1] must equal 2 so that the
+                    noise scale is modelled as a second output of the network.
         """
+        if noise_scale_prior is not None:
+            assert layer_units[-1] == 1
+        else:
+            assert layer_units[-1] == 2
         self.input_shape = input_shape
         self.layer_units = layer_units
         self.layer_activations = layer_activations
@@ -133,17 +139,28 @@ class HMCDensityNetwork:
     def thinned_samples(self, thinning):
         return tf.nest.map_structure(lambda x: x[::thinning], self.samples)
 
+    def _split_sample_weights_and_noise_scale(self, samples):
+        if self.noise_scale_prior is not None:
+            weights = samples[:-1]
+            unconstrained_noise_scale = samples[-1]
+        else:
+            weights = samples
+            unconstrained_noise_scale = None
+        return weights, unconstrained_noise_scale
+
     def log_prior(self, weights, unconstrained_noise_scale):
         log_prob = 0
         for w, w_prior in zip(weights, self.network_prior):
             log_prob += w_prior.log_prob(w)
 
-        noise_scale = transform_unconstrained_scale(
-            unconstrained_noise_scale, factor=self.transform_unconstrained_scale_factor
-        )
-        log_prob += tf.reduce_sum(
-            self.noise_scale_prior.log_prob(noise_scale), axis=(-1, -2)
-        )
+        if unconstrained_noise_scale is not None:
+            noise_scale = transform_unconstrained_scale(
+                unconstrained_noise_scale,
+                factor=self.transform_unconstrained_scale_factor,
+            )
+            log_prob += tf.reduce_sum(
+                self.noise_scale_prior.log_prob(noise_scale), axis=(-1, -2)
+            )
         return log_prob
 
     def log_likelihood(self, weights, unconstrained_noise_scale, x, y):
@@ -157,8 +174,10 @@ class HMCDensityNetwork:
 
     def _target_log_prob_fn_factory(self, x, y):
         def log_posterior(*current_state):
-            unconstrained_noise_scale = current_state[-1]
-            weights = current_state[0:-1]  # includes biases
+            (
+                weights,
+                unconstrained_noise_scale,
+            ) = self._split_sample_weights_and_noise_scale(current_state)
             log_prob = self.log_prior(weights, unconstrained_noise_scale)
             log_prob += self.log_likelihood(weights, unconstrained_noise_scale, x, y)
             return log_prob
@@ -175,11 +194,12 @@ class HMCDensityNetwork:
         for w_prior in self.network_prior:
             w_sample = w_prior.sample(n_samples) * overdisp
             prior_state.append(w_sample)
-        noise_scale = self.noise_scale_prior.sample(n_samples)
-        unconstrained_noise_scale = backtransform_constrained_scale(
-            noise_scale, factor=self.transform_unconstrained_scale_factor
-        )
-        prior_state.append(unconstrained_noise_scale)
+        if self.noise_scale_prior is not None:
+            noise_scale = self.noise_scale_prior.sample(n_samples)
+            unconstrained_noise_scale = backtransform_constrained_scale(
+                noise_scale, factor=self.transform_unconstrained_scale_factor
+            )
+            prior_state.append(unconstrained_noise_scale)
         return prior_state
 
     @tf.function  # (experimental_compile=True)
@@ -292,11 +312,14 @@ class HMCDensityNetwork:
                         (n_samples / thinning, n_chains)
         """
         samples = self.thinned_samples(thinning=thinning)
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            samples
+        )
         model = build_scratch_density_model(
-            samples[:-1],
+            weights,
             self.layer_activation_functions,
             self.transform_unconstrained_scale_factor,
-            samples[-1],
+            unconstrained_noise_scale,
         )
         prediction = model(x)
         return prediction
@@ -350,11 +373,14 @@ class HMCDensityNetwork:
         samples = self.thinned_samples(thinning=thinning)
         n_samples = samples[0].shape[0]
         samples = tf.nest.map_structure(lambda x: x[:, i_chain], samples)
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            samples
+        )
         model = build_scratch_density_model(
-            samples[:-1],
+            weights,
             self.layer_activation_functions,
             self.transform_unconstrained_scale_factor,
-            samples[-1],
+            unconstrained_noise_scale,
         )
         prediction = model(x)
         cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
@@ -461,8 +487,9 @@ class HMCDensityNetwork:
         sample_parameters is a list of tensors or arrays specifying the network
         parameters.
         """
-        unconstrained_noise_scale = sample_parameters[-1]
-        weights = sample_parameters[:-1]
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            sample_parameters
+        )
         model = build_scratch_density_model(
             weights,
             self.layer_activation_functions,
@@ -546,7 +573,7 @@ def mask_nonsense_chains(
     y_train=None,
 ):
     undo_masking(hmc_net)
-
+    chain_mask = tf.cast(tf.ones((hmc_net.n_chains,)), "bool")
     if median_scale_cutter is not None:
         # Mask by nonsense scales
         scales = transform_unconstrained_scale(
@@ -556,7 +583,7 @@ def mask_nonsense_chains(
             scales, 50.0, interpolation="midpoint", axis=(0, 2, 3)
         )
         scale_mask = tf.greater_equal(median_scale_cutter, median_scale_per_chain)
-        chain_mask = scale_mask
+        chain_mask = tf.math.logical_and(chain_mask, scale_mask)
         print(
             "Chains removed because of nonsense scales:",
             hmc_net.n_chains
