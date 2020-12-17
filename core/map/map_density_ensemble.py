@@ -453,14 +453,15 @@ class MapDensityNetwork:
             b_priors.append(tfd.Normal(0, tf.ones(u2) * b_scale))
         return w_priors, b_priors
 
-    def sample_prior_state(self, n_states=1, seed=0):
-        weight_priors, bias_priors = self._get_priors()
+    def sample_prior_state(self, seed=0):
         tf.random.set_seed(seed)
         state = []
-        for w_prior, b_prior in zip(weight_priors, bias_priors):
-            w = w_prior.sample()
-            b = b_prior.sample()
+        previous_layer_units = self.input_shape[0]
+        for units in self.layer_units:
+            w = self.weight_prior.sample((previous_layer_units, units))
+            b = self.bias_prior.sample((units,))
             state.extend([w, b])
+            previous_layer_units = units
         return state
 
     def fit_preprocessing(self, y_train):
@@ -542,7 +543,7 @@ class MapDensityNetwork:
         saved_weights = self.get_weights()
         predictive_distributions = []
         for sample in range(n_samples):
-            prior_sample = self.sample_prior_state(seed=seed + sample * 0.01)
+            prior_sample = self.sample_prior_state(seed=seed + sample)
             self.set_weights(prior_sample)
             prediction = self.predict(x_test)
             predictive_distributions.append(prediction)
