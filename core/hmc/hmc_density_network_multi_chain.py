@@ -127,7 +127,7 @@ class HMCDensityNetwork:
 
     def mask_chains(self, chain_mask):
         """
-        Supplies a mask that is used to mask out some chains e.g. because they were
+        Takes a boolean mask that is used to mask out some chains e.g. because they were
         divergent.
 
         Args:
