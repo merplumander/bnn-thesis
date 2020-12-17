@@ -398,89 +398,6 @@ class HMCDensityNetwork:
         sample = tf.nest.map_structure(lambda x: x[i_sample, i_chain], self.samples)
         return self.predict_from_sample_parameters(x, sample)
 
-    ## OLD ##
-    # def predict_list_of_gaussians(self, x_test, thinning=1, n_predictions=None):
-    #     """
-    #     Produces a list of aleatoric Gaussian predictions from the sampled parameters
-    #     out of the markov chain. Together they also represent epistemic uncertainty.
-    #     Args:
-    #         thinning (int):      (thinning - 1) samples will be skipped in between two
-    #                              predictions.
-    #         n_predictions (int): How many samples should be used to make predictions.
-    #                              If n_predictions is specified, thinning will be
-    #                              ignored.
-    #     """
-    #     n_samples = len(self.combined_samples[0])
-    #     if n_predictions is None:
-    #         loop_over = tf.range(0, n_samples, thinning)
-    #     else:
-    #         loop_over = _linspace_network_indices(n_samples, n_predictions)
-    #     # A network parameterized by a sample from the chain produces a (aleatoric)
-    #     # predictive normal distribution for the x_test. They are all accumulated in
-    #     # this list
-    #     predictive_distributions = []
-    #     for i_sample in loop_over:
-    #         params_list = [param[i_sample] for param in self.combined_samples]
-    #         noise_std = transform_unconstrained_scale(
-    #             params_list[-1], factor=self.transform_unconstrained_scale_factor
-    #         )
-    #         weights_list = params_list[:-1]
-    #         model = build_scratch_model(
-    #             weights_list, noise_std, self.layer_activation_functions
-    #         )
-    #         prediction = model(x_test)
-    #         predictive_distributions.append(prediction)
-    #     return predictive_distributions
-    #
-    ## OLD ##
-    # def predict_mixture_of_gaussians(self, cat_probs, gaussians):
-    #     return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
-    #
-    ## OLD ##
-    # def predict(self, x_test, thinning=1):
-    #     gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
-    #     cat_probs = tf.ones((x_test.shape[0],) + (1, len(gaussians))) / len(gaussians)
-    #     return self.predict_mixture_of_gaussians(cat_probs, gaussians)
-    #
-    ## OLD ##
-    # def predict_unnormalized_space(self, x_test, mean, scale, thinning=1):
-    #     """
-    #     Predict and transform the predictive distribution into the unnormalized space
-    #
-    #     Args:
-    #         mean (float):  Mean of the unnormalized training data. I.e. mean of the
-    #                        z-transformation that transformed the data into the normalized
-    #                        space.
-    #         scale (float): Scale of the unnormalized training data.
-    #     """
-    #     gaussians = self.predict_list_of_gaussians(x_test, thinning=thinning)
-    #     unnormalized_gaussians = []
-    #     for prediction in gaussians:
-    #         predictive_mean = prediction.mean()
-    #         predictive_std = prediction.stddev()
-    #         predictive_mean = (predictive_mean * scale) + mean
-    #         predictive_std = predictive_std * scale
-    #         unnormalized_gaussians.append(tfd.Normal(predictive_mean, predictive_std))
-    #     cat_probs = tf.ones((x_test.shape[0],) + (1, len(gaussians))) / len(gaussians)
-    #     return self.predict_mixture_of_gaussians(cat_probs, unnormalized_gaussians)
-
-    ## OLD ##
-    # # very useful for debugging
-    # def predict_list_from_sample_indices(self, x_test, burnin=False, indices=[0]):
-    #     predictive_distributions = []
-    #     for i_sample in indices:
-    #         params_list = [param[i_sample] for param in self.samples]
-    #         noise_std = transform_unconstrained_scale(
-    #             params_list[-1], factor=self.transform_unconstrained_scale_factor
-    #         )
-    #         weights_list = params_list[:-1]
-    #         model = build_scratch_model(
-    #             weights_list, noise_std, self.layer_activation_functions
-    #         )
-    #         prediction = model(x_test)
-    #         predictive_distributions.append(prediction)
-    #     return predictive_distributions
-
     # very useful for debugging
     def predict_from_sample_parameters(self, x, sample_parameters):
         """
@@ -498,24 +415,6 @@ class HMCDensityNetwork:
         )
         prediction = model(x)
         return prediction
-
-    ## OLD ##
-    # # very useful for debugging
-    # def predict_mixture_from_sample_indices(self, x_test, burnin=False, indices=[0]):
-    #     gaussians = self.predict_list_from_sample_indices(
-    #         x_test, burnin=burnin, indices=indices
-    #     )
-    #     cat_probs = tf.ones(x_test.shape + (len(gaussians),)) / len(gaussians)
-    #     return self.predict_mixture_of_gaussians(cat_probs, gaussians)
-
-    ## OLD ##
-    # def predict_with_prior_samples(self, x_test, n_samples=5, seed=0):
-    #     predictive_distributions = []
-    #     for sample in range(n_samples):
-    #         prior_sample = self.sample_prior_state(seed=seed + sample * 0.01)
-    #         prediction = self.predict_from_sample_parameters(x_test, prior_sample)
-    #         predictive_distributions.append(prediction)
-    #     return predictive_distributions
 
     def save(self, save_path):
         init_dict = dict(
@@ -572,6 +471,25 @@ def mask_nonsense_chains(
     x_train=None,
     y_train=None,
 ):
+    """
+    Function that takes an HMC network and masks some MCMC chains based on nonsensical
+    samples.
+
+    Args:
+        median_scale_cutter (float, optional):
+                Chains with a median scale above this value are masked. Useful since we
+                are often predicting in a normalized y-space and therefore know that
+                noise scales cannot be above 1.
+        lowest_acceptance_ratio (float, optional):
+                Chains with a lower acceptance ratio are masked.
+        highest_acceptance_ratio (float, optional):
+                Chains with a higher acceptance ratio are masked.
+        x_train (numpy array or tensorflow tensor, optional):
+                Actual data. If both x_train and y_train are provided, then chains are
+                masked out if the chain's sample with highest posterior probability has
+                a lower probability then the highest of the minimal posterior
+                probabilities of samples across chains.
+    """
     undo_masking(hmc_net)
     chain_mask = tf.cast(tf.ones((hmc_net.n_chains,)), "bool")
     if median_scale_cutter is not None:
