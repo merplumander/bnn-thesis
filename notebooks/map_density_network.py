@@ -1,12 +1,14 @@
 # %load_ext autoreload
 # %autoreload 2
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from sklearn.preprocessing import StandardScaler
 
-from core.map import MapDensityNetwork
+from core.map import MapDensityNetwork, map_density_network_from_save_path
 from core.network_utils import prior_scale_to_regularization_lambda
 from core.plotting_utils import (
     plot_distribution_samples,
@@ -115,9 +117,9 @@ early_stop_callback = tf.keras.callbacks.EarlyStopping(
     monitor="val_loss", patience=20, verbose=1, restore_best_weights=True
 )
 
-initial_learning_rate = 0.05
+initial_learning_rate = 0.1
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-    initial_learning_rate, decay_steps=20, decay_rate=0.9, staircase=True
+    initial_learning_rate, decay_steps=20, decay_rate=0.95, staircase=True
 )
 layer_units[-1] = 1
 net = MapDensityNetwork(
@@ -135,7 +137,6 @@ net = MapDensityNetwork(
     preprocess_y=True,
     learning_rate=0.01,
 )
-layer_units[-1] = 2
 
 
 # %%
@@ -149,6 +150,31 @@ net.fit(
     verbose=0,
 )
 
+
+prediction = net.predict(x_plot)
+plot_moment_matched_predictive_normal_distribution(
+    x_plot=x_plot,
+    predictive_distribution=prediction,
+    x_train=x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
+)
+
+# %% markdown
+# Saving and reloading is also possible
+
+
+# %%
+save_dir = "._toy_network_saving/"
+save_dir = Path(save_dir)
+save_dir.mkdir(parents=True, exist_ok=True)
+save_path = save_dir.joinpath("toy_map_network")
+net.save(save_path)
+
+
+# %%
+net = map_density_network_from_save_path(save_path)
 
 prediction = net.predict(x_plot)
 plot_moment_matched_predictive_normal_distribution(

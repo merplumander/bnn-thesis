@@ -124,7 +124,7 @@ class MapDensityEnsemble:
         validation_data=None,
         verbose=1,
     ):
-        delta = 100
+        delta = 1000000
         seeds = [
             i
             for i in range(
@@ -294,14 +294,34 @@ class MapDensityEnsemble:
             network.set_weights(network_weights)
 
     def save(self, save_path):
-        save_path = Path(save_path)
-        for i, net in enumerate(self.networks):
-            net.save(save_path.joinpath(f"_{i}"))
-        networks = self.networks
-        self.networks = None
-        with open(save_path.joinpath("pickle_class"), "wb") as f:
-            pickle.dump(self, f, -1)
-        self.networks = networks
+        init_dict = dict(
+            n_networks=self.n_networks,
+            input_shape=self.input_shape,
+            layer_units=self.layer_units,
+            layer_activations=self.layer_activations,
+            initial_unconstrained_scale=self.initial_unconstrained_scale,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+            weight_prior=self.weight_prior,
+            bias_prior=self.bias_prior,
+            noise_scale_prior=self.noise_scale_prior,
+            n_train=self.n_train,
+            l2_weight_lambda=self.l2_weight_lambda,
+            l2_bias_lambda=self.l2_bias_lambda,
+            preprocess_x=self.preprocess_x,
+            preprocess_y=self.preprocess_y,
+            learning_rate=self.learning_rate,
+            names=self.names,
+            seed=self.seed,
+        )
+
+        net_dics = []
+        for net in self.networks:
+            net_dics.append(net.get_save_dict())
+        fit_dict = dict(total_epochs=self.total_epochs, net_dics=net_dics)
+        dic = dict(init=init_dict, fit=fit_dict)
+
+        with open(save_path, "wb") as f:
+            pickle.dump(dic, f, -1)
 
 
 class MapDensityNetwork:
@@ -354,8 +374,9 @@ class MapDensityNetwork:
         self.seed = seed
         tf.random.set_seed(self.seed)
 
-        if self.preprocess_y:
-            self.y_preprocessor = StandardizePreprocessor()
+        self.y_preprocessor = StandardizePreprocessor() if self.preprocess_y else None
+        self.history = None
+        self.total_epochs = None
 
         self.network = build_keras_model(
             self.input_shape,
@@ -565,41 +586,69 @@ class MapDensityNetwork:
             weights_list[-1] = weights_list[-1].reshape(1, 1)
         self.network.set_weights(weights_list)
 
+    def get_save_dict(self):
+        init_dict = dict(
+            input_shape=self.input_shape,
+            layer_units=self.layer_units,
+            layer_activations=self.layer_activations,
+            initial_unconstrained_scale=self.initial_unconstrained_scale,
+            transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
+            weight_prior=self.weight_prior,
+            bias_prior=self.bias_prior,
+            noise_scale_prior=self.noise_scale_prior,
+            n_train=self.n_train,
+            l2_weight_lambda=self.l2_weight_lambda,
+            l2_bias_lambda=self.l2_bias_lambda,
+            preprocess_x=self.preprocess_x,
+            preprocess_y=self.preprocess_y,
+            learning_rate=self.learning_rate,
+            names=self.names,
+            seed=self.seed,
+        )
+
+        fit_dict = dict(
+            y_preprocessor=self.y_preprocessor,
+            total_epochs=self.total_epochs,
+            weights=self.get_weights(),
+        )
+        dic = dict(init=init_dict, fit=fit_dict)
+        return dic
+
     def save(self, save_path):
-        self.network.save(save_path)
-        network = self.network
-        history = self.history
-        self.network = None
-        self.history = None
-        save_path = Path(save_path)
-        with open(save_path.joinpath("pickle_class"), "wb") as f:
-            pickle.dump(self, f, -1)
-        self.network = network
-        self.history = history
+        dic = self.get_save_dict()
+
+        with open(save_path, "wb") as f:
+            pickle.dump(dic, f, -1)
 
 
-def map_density_ensemble_from_save_path(save_path):
-    save_path = Path(save_path)
-    with open(save_path.joinpath("pickle_class"), "rb") as f:
-        ensemble = pickle.load(f)
-    networks = [
-        map_density_network_from_save_path(save_path.joinpath(f"_{i}"))
-        for i in range(ensemble._n_networks)
-    ]
-    ensemble.networks = networks
-    return ensemble
+def map_density_network_from_save_dic(dic):
+    net = MapDensityNetwork(**dic["init"])
+    fit_d = dic["fit"]
+    net.y_preprocessor = fit_d["y_preprocessor"]
+    net.total_epochs = fit_d["total_epochs"]
+    net.set_weights(fit_d["weights"])
+    return net
 
 
 def map_density_network_from_save_path(save_path):
-    save_path = Path(save_path)
-    with open(save_path.joinpath("pickle_class"), "rb") as f:
-        net = pickle.load(f)
-    net.network = tf.keras.models.load_model(save_path, compile=False)
-    net.network.compile(
-        optimizer=tf.keras.optimizers.Adam(net.learning_rate),
-        loss=MapDensityNetwork.negative_log_likelihood,
-    )
+    with open(save_path, "rb") as f:
+        dic = pickle.load(f)
+
+    net = map_density_network_from_save_dic(dic)
+    print("Training history is not preserved when saving and loading a model.")
     print(
         "When resuming training on this model, check wether the optimizers state is set correctly. Likely it starts from step 0 again. Which might be a problem for LearningRateSchedules."
     )
     return net
+
+
+def map_density_ensemble_from_save_path(save_path):
+    with open(save_path, "rb") as f:
+        dic = pickle.load(f)
+    ensemble = MapDensityEnsemble(**dic["init"])
+    fit_d = dic["fit"]
+    ensemble.total_epochs = fit_d["total_epochs"]
+    ensemble.networks = [
+        map_density_network_from_save_dic(dic) for dic in fit_d["net_dics"]
+    ]
+    return ensemble

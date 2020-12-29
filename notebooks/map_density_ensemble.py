@@ -1,6 +1,7 @@
 # %load_ext autoreload
 # %autoreload 2
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +33,7 @@ figure_dir = "./figures"
 
 # %% codecell
 np.random.seed(0)
-n_networks = 10
+n_networks = 2
 n_train = 20
 batchsize_train = 20
 
@@ -94,7 +95,7 @@ ensemble.fit_additional_memebers(
     y_train=y_train,
     batch_size=batchsize_train,
     n_new_members=2,
-    epochs=100,
+    epochs=200,
     verbose=0,
 )
 mog_prediction = ensemble.predict(x_plot)  # Mixture Of Gaussian prediction
@@ -109,7 +110,10 @@ plot_moment_matched_predictive_normal_distribution(
 
 
 # %%
-save_path = "._toy_ensemble_saving"
+save_dir = "._toy_network_saving/"
+save_dir = Path(save_dir)
+save_dir.mkdir(parents=True, exist_ok=True)
+save_path = save_dir.joinpath("toy_map_ensemble")
 ensemble.save(save_path)
 
 # %%

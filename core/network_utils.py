@@ -24,10 +24,11 @@ class NormalizationFix(tf.keras.layers.experimental.preprocessing.Normalization)
             bmask, tf.ones_like(self.variance), tf.zeros_like(self.variance)
         )
 
-        self.variance = self.variance + imask
+        self.variance.assign(self.variance + imask)
 
     def get_config(self):
         config = super().get_config()
+
         # config.update({"variance": self.variance})
         return config
 
