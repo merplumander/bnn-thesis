@@ -303,7 +303,7 @@ class MapDensityEnsemble:
             transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
             weight_prior=self.weight_prior,
             bias_prior=self.bias_prior,
-            noise_scale_prior=self.noise_scale_prior,
+            # noise_scale_prior=self.noise_scale_prior,
             n_train=self.n_train,
             l2_weight_lambda=self.l2_weight_lambda,
             l2_bias_lambda=self.l2_bias_lambda,
@@ -595,7 +595,7 @@ class MapDensityNetwork:
             transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
             weight_prior=self.weight_prior,
             bias_prior=self.bias_prior,
-            noise_scale_prior=self.noise_scale_prior,
+            # noise_scale_prior=self.noise_scale_prior,
             n_train=self.n_train,
             l2_weight_lambda=self.l2_weight_lambda,
             l2_bias_lambda=self.l2_bias_lambda,
@@ -622,6 +622,9 @@ class MapDensityNetwork:
 
 
 def map_density_network_from_save_dic(dic):
+    """
+    Recreates a map density network from a save-dictionary.
+    """
     net = MapDensityNetwork(**dic["init"])
     fit_d = dic["fit"]
     net.y_preprocessor = fit_d["y_preprocessor"]
@@ -630,10 +633,19 @@ def map_density_network_from_save_dic(dic):
     return net
 
 
-def map_density_network_from_save_path(save_path):
+def map_density_network_from_save_path(save_path, noise_scale_prior=None):
+    """
+    Recreates a map density network from a save-path. Unfortunately, tensorflow
+    probability distributions cannot reliably be pickled (specifically it doesn't work
+    for transformed distributions). Since the noise_scale_prior is often a transformed
+    distribution I chose not to save it two disk. Therefore it needs to be provided here
+    as an additional argument if you want to e.g. resume training or sample from the
+    prior. Don't worry about providing it if you only care about the saved networks
+    prediction.
+    """
     with open(save_path, "rb") as f:
         dic = pickle.load(f)
-
+    dic["init"]["noise_scale_prior"] = noise_scale_prior
     net = map_density_network_from_save_dic(dic)
     print("Training history is not preserved when saving and loading a model.")
     print(
@@ -642,9 +654,10 @@ def map_density_network_from_save_path(save_path):
     return net
 
 
-def map_density_ensemble_from_save_path(save_path):
+def map_density_ensemble_from_save_path(save_path, noise_scale_prior=None):
     with open(save_path, "rb") as f:
         dic = pickle.load(f)
+    dic["init"]["noise_scale_prior"] = noise_scale_prior
     ensemble = MapDensityEnsemble(**dic["init"])
     fit_d = dic["fit"]
     ensemble.total_epochs = fit_d["total_epochs"]

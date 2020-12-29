@@ -45,6 +45,12 @@ layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
 weight_prior = tfd.Normal(0, 1)
 bias_prior = weight_prior
+a = 0.5
+b = 0.01
+_var_d = tfd.InverseGamma(a, b)
+noise_scale_prior = tfd.TransformedDistribution(
+    distribution=_var_d, bijector=tfp.bijectors.Invert(tfp.bijectors.Square())
+)
 
 # %% codecell
 y_lim = [-5, 7]
@@ -132,6 +138,7 @@ net = MapDensityNetwork(
     transform_unconstrained_scale_factor=0.5,
     weight_prior=weight_prior,
     bias_prior=bias_prior,
+    noise_scale_prior=noise_scale_prior,
     n_train=n_train,
     preprocess_x=True,
     preprocess_y=True,
