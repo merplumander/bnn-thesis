@@ -264,7 +264,6 @@ class PostHocLastLayerBayesianNetwork:
         )
         features_train = self.feature_extractor(x_train).numpy()
         features_train = np.hstack((features_train, np.ones((x_train.shape[0], 1))))
-        ml_noise_sigma = self.network.noise_sigma
 
         # "fit" bayesian linear regression
         n_features = features_train.shape[1]
@@ -279,11 +278,21 @@ class PostHocLastLayerBayesianNetwork:
             elif (
                 self.last_layer_prior == "standard-normal-weights-non-informative-scale"
             ):
+                ml_noise_sigma = self.network.noise_sigma
                 self.last_layer_prior_params = {
                     "mu_0": np.zeros((n_features, 1)),
                     "V_0": (1 / ml_noise_sigma ** 2) * np.eye(n_features),
                     "a_0": -n_features / 2,
                     "b_0": 0,
+                }
+            elif self.last_layer_prior == "weakly-informative":
+                a = 0.5
+                b = 0.01
+                self.last_layer_prior_params = {
+                    "mu_0": np.zeros((n_features, 1)),
+                    "V_0": (a / b) * np.eye(n_features),
+                    "a_0": a,
+                    "b_0": b,
                 }
             else:
                 raise ValueError(

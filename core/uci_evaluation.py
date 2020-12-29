@@ -30,11 +30,17 @@ from data.uci import load_uci_data
 
 tfd = tfp.distributions
 
+################################################################################
+# These helper functions should in principle be written again from scratch.
+# They historically grew ever larger, more complicated, and not modular.
+# Nevertheless it seems not time efficient right now to rewrite them from scratch.
+################################################################################
+
 
 def load_models(save_dir, load_model_function):
     paths = Path(save_dir).glob("*")
-    model_files = sorted([x for x in paths if x.is_dir()])
-    print(model_files)
+    model_files = sorted(paths)
+    print(len(model_files))
     models = []
     if len(model_files) == 0:
         raise RuntimeError(f"No models found at {save_dir}.")
@@ -147,9 +153,10 @@ def kfold_evaluate_uci(
     model_kwargs={},
     fit_kwargs={},
     fit_kwargs_list=None,
-    ensemble_predict_moment_matched=False  # If True the NLL will also be computed for
+    ensemble_predict_moment_matched=False,  # If True the NLL will also be computed for
     # the moment matched predictive distribution and not just the mixture predictive
     # distribution.
+    verbose=False,
 ):
     x, y, train_indices, validation_indices, test_indices = load_uci_data(
         dataset, validation_split=validation_split, gap_data=use_gap_data
@@ -183,14 +190,15 @@ def kfold_evaluate_uci(
             validation_data = None
         if model_class == VariationalDensityNetwork:
             model_kwargs["kl_weight"] = 1 / x_train.shape[0]
+        n_train = x_train.shape[0]
+        if "weight_prior" in model_kwargs.keys():
+            model_kwargs["n_train"] = n_train
         if weight_prior_scale is not None:
-            n_train = x_train.shape[0]
             l2_weight_lambda = prior_scale_to_regularization_lambda(
                 weight_prior_scale, n_train
             )
             model_kwargs["l2_weight_lambda"] = l2_weight_lambda
         if bias_prior_scale is not None:
-            n_train = x_train.shape[0]
             l2_bias_lambda = prior_scale_to_regularization_lambda(
                 bias_prior_scale, n_train
             )
@@ -198,6 +206,8 @@ def kfold_evaluate_uci(
         model = model_class(**model_kwargs, seed=train_seed + i)
         if model_class == VariationalDensityNetwork:
             model_kwargs.pop("kl_weight")
+        if "n_train" in model_kwargs.keys():
+            model_kwargs.pop("n_train")
         start = time.time()
         model.fit(
             x_train, y_train, **fit_kwargs, validation_data=validation_data, verbose=0
@@ -233,6 +243,8 @@ def kfold_evaluate_uci(
             )
             mm_negative_log_likelihoods.append(mm_negative_log_likelihood)
         models.append(model)
+        if verbose:
+            print(f"Done Split {i}")
     return_tuple = (
         (
             rmses,
@@ -593,39 +605,30 @@ def generate_member_indices(n_networks, size, n_comb_max=100, seed=0):
     return combs
 
 
-def evaluate_ensemble_size(model, x_test, y_test, size=1, n_comb_max=100, seed=0):
+def evaluate_ensemble_size(model, x_test, y_test, size=1, seed=0):
     nets = model.networks
-    n_networks = len(nets)
-    combs = generate_member_indices(n_networks, size, n_comb_max=n_comb_max, seed=seed)
-    rmses, nlls, mm_nlls = [], [], []
-    for comb in combs:
-        model.networks = [nets[i] for i in comb]
-        model.predict(x_test)
-        predictive_distribution = model.predict(x_test)
-        rmse = (
-            calculate_rmse(predictive_distribution.mean(), y_test)
-            .numpy()
-            .astype(np.float)
-        )
-        negative_log_likelihood = (
-            -tf.reduce_mean(predictive_distribution.log_prob(y_test))
-            .numpy()
-            .astype(np.float)
-        )
-        mm_predictive_distribution = model.predict_moment_matched_gaussian(x_test)
-        # rmse_mm = calculate_rmse(mm_predictive_distribution.mean(), y_test)
-        # assert rmse_mm == rmse
-        mm_negative_log_likelihood = (
-            -tf.reduce_mean(mm_predictive_distribution.log_prob(y_test))
-            .numpy()
-            .astype(np.float)
-        )
-        rmses.append(rmse)
-        nlls.append(negative_log_likelihood)
-        mm_nlls.append(mm_negative_log_likelihood)
+    model.networks = nets[:size]
+    model.predict(x_test)
+    predictive_distribution = model.predict(x_test)
+    rmse = (
+        calculate_rmse(predictive_distribution.mean(), y_test).numpy().astype(np.float)
+    )
+    negative_log_likelihood = (
+        -tf.reduce_mean(predictive_distribution.log_prob(y_test))
+        .numpy()
+        .astype(np.float)
+    )
+    mm_predictive_distribution = model.predict_moment_matched_gaussian(x_test)
+    # rmse_mm = calculate_rmse(mm_predictive_distribution.mean(), y_test)
+    # assert rmse_mm == rmse
+    mm_negative_log_likelihood = (
+        -tf.reduce_mean(mm_predictive_distribution.log_prob(y_test))
+        .numpy()
+        .astype(np.float)
+    )
     # undo side effects
     model.networks = nets
-    return rmses, nlls, mm_nlls
+    return rmse, negative_log_likelihood, mm_negative_log_likelihood
 
 
 def uci_benchmark_ensemble_sizes_save_plot(
@@ -645,11 +648,14 @@ def uci_benchmark_ensemble_sizes_save_plot(
     early_stop_callback=None,
     weight_prior_scale=None,
     bias_prior_scale=None,
+    weight_prior=None,
+    bias_prior=None,
+    noise_scale_prior=None,
     last_layer_prior="non-informative",
     last_layer_prior_params=None,
     validation_split=0.0,
-    n_comb_max=100,
     save=True,  # wether to save the results dict
+    verbose=False,
 ):
 
     results = {}
@@ -664,6 +670,9 @@ def uci_benchmark_ensemble_sizes_save_plot(
         "layer_activations": layer_activations,
         "initial_unconstrained_scale": initial_unconstrained_scale,
         "transform_unconstrained_scale_factor": transform_unconstrained_scale_factor,
+        "weight_prior": weight_prior,
+        "bias_prior": bias_prior,
+        "noise_scale_prior": noise_scale_prior,
         "preprocess_x": True,
         "preprocess_y": True,
         "learning_rate": learning_rate,
@@ -674,7 +683,7 @@ def uci_benchmark_ensemble_sizes_save_plot(
         model_save_dir = Path(model_save_dir)
         model_save_dir.mkdir(parents=True, exist_ok=True)
         ensemble_save_path = model_save_dir.joinpath(
-            f"uci_benchmark_ensemble_sizes_{experiment_name}_{dataset}_gap-{use_gap_data}/ensemble"
+            f"uci_benchmark_ensemble_sizes_{experiment_name}_{dataset}_gap-{use_gap_data}"
         )
         if ensemble_save_path.is_dir():
             print("Loading ensemble from disk")
@@ -693,10 +702,11 @@ def uci_benchmark_ensemble_sizes_save_plot(
                 bias_prior_scale=bias_prior_scale,
                 model_kwargs=model_kwargs,
                 fit_kwargs=fit_kwargs,
+                verbose=verbose,
             )
             save_models(ensemble_save_path, ensemble_models)
     else:
-        (_, _, ensemble_models, _, _) = kfold_evaluate_uci(
+        (_, _, ensemble_models, total_epochs, _) = kfold_evaluate_uci(
             dataset=dataset,
             use_gap_data=use_gap_data,
             model_class=MapDensityEnsemble,
@@ -706,7 +716,9 @@ def uci_benchmark_ensemble_sizes_save_plot(
             bias_prior_scale=bias_prior_scale,
             model_kwargs=model_kwargs,
             fit_kwargs=fit_kwargs,
+            verbose=verbose,
         )
+        print(total_epochs)
 
     print("Done Ensemble Training.")
     x, y, train_indices, validation_indices, test_indices = load_uci_data(
@@ -714,13 +726,17 @@ def uci_benchmark_ensemble_sizes_save_plot(
     )
     results = {}
     rmses, nlls, mm_nlls = [], [], []
-    for size in np.arange(n_networks) + 1:
+    _net_sizes = np.arange(n_networks) + 1
+    _net_sizes = _net_sizes[
+        np.logical_or(_net_sizes <= 20, _net_sizes % 5 == 0)
+    ]  # Only test for network sizes below 20 or divisible by 5
+    for size in _net_sizes:
         size_rmses, size_nlls, size_mm_nlls = [], [], []
         for split, model in enumerate(ensemble_models):
             x_test = x[test_indices[split]]
             y_test = y[test_indices[split]].reshape(-1, 1)
             rmse, nll, mm_nll = evaluate_ensemble_size(
-                model, x_test, y_test, size=size, n_comb_max=n_comb_max, seed=0
+                model, x_test, y_test, size=size, seed=0
             )
             size_rmses.append(rmse)
             size_nlls.append(nll)
@@ -732,6 +748,9 @@ def uci_benchmark_ensemble_sizes_save_plot(
     print("Done Ensemble Testing.")
 
     model_kwargs.pop("names")
+    model_kwargs.pop("weight_prior")
+    model_kwargs.pop("bias_prior")
+    model_kwargs.pop("noise_scale_prior")
     model_kwargs["last_layer_prior"] = last_layer_prior
     model_kwargs["last_layer_prior_params"] = last_layer_prior_params
     llb_ensemble_fit_kwargs_list = [
@@ -749,13 +768,13 @@ def uci_benchmark_ensemble_sizes_save_plot(
     print("Done LLB Ensemble Training.")
 
     rmses, nlls, mm_nlls = [], [], []
-    for size in np.arange(n_networks) + 1:
+    for size in _net_sizes:
         size_rmses, size_nlls, size_mm_nlls = [], [], []
         for split, model in enumerate(llb_ensemble_models):
             x_test = x[test_indices[split]]
             y_test = y[test_indices[split]].reshape(-1, 1)
             rmse, nll, mm_nll = evaluate_ensemble_size(
-                model, x_test, y_test, size=size, n_comb_max=n_comb_max, seed=0
+                model, x_test, y_test, size=size, seed=0
             )
             size_rmses.append(rmse)
             size_nlls.append(nll)
