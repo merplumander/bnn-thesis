@@ -33,6 +33,7 @@ class HMCDensityNetwork:
         step_size=0.01,
         num_leapfrog_steps=100,  # only relevant for HMC
         max_tree_depth=10,  # only relevant for NUTS
+        num_steps_between_results=0,
         seed=0,
     ):
         """
@@ -69,6 +70,7 @@ class HMCDensityNetwork:
         self.step_size = step_size
         self.num_leapfrog_steps = num_leapfrog_steps
         self.max_tree_depth = max_tree_depth
+        self.num_steps_between_results = num_steps_between_results
         self.seed = seed
 
         self.layer_activation_functions = activation_strings_to_activation_functions(
@@ -80,7 +82,6 @@ class HMCDensityNetwork:
             "dual_averaging": tfp.mcmc.DualAveragingStepSizeAdaptation,
         }[self._step_size_adapter]
 
-        self._samples = None
         self._chain = None
         self._trace = None
         self.chain_mask = None
@@ -98,10 +99,6 @@ class HMCDensityNetwork:
     def n_samples(self):
         return self.samples[0].shape[0]
 
-    @property
-    def _non_burnin_samples(self):
-        return tf.nest.map_structure(lambda x: x[self.num_burnin_steps :], self._chain)
-
     def _apply_chain_mask(self, samples):
         if self.chain_mask is not None:
             samples = tf.nest.map_structure(
@@ -109,15 +106,13 @@ class HMCDensityNetwork:
             )
         return samples
 
-    def _assign_used_samples(self):
-        _samples = self._non_burnin_samples
-        self._samples = self._apply_chain_mask(_samples)
-
     @property
     def samples(self):
-        if self._samples is None:
-            self._assign_used_samples()
-        return self._samples
+        _samples = tf.nest.map_structure(
+            lambda x: x[self.num_burnin_steps :], self._chain
+        )
+        _samples = self._apply_chain_mask(_samples)
+        return _samples
 
     @property
     def trace(self):
@@ -134,7 +129,6 @@ class HMCDensityNetwork:
             chain_mask (boolean tensor): Boolean tensor with shape (n_chains).
         """
         self.chain_mask = chain_mask
-        self._assign_used_samples()
 
     def thinned_samples(self, thinning):
         return tf.nest.map_structure(lambda x: x[::thinning], self.samples)
@@ -220,6 +214,7 @@ class HMCDensityNetwork:
             kernel=adaptive_kernel,
             return_final_kernel_results=True,
             trace_fn=trace_fn,
+            num_steps_between_results=self.num_steps_between_results,
             seed=self.seed,
         )
         return chain, trace, final_kernel_results
@@ -274,8 +269,6 @@ class HMCDensityNetwork:
             self._trace = tf.nest.map_structure(
                 lambda *parts: tf.concat(parts, axis=0), *[self._trace, trace]
             )
-        # After changing self._chain we always need to call _assign_used_samples to ensure that all relevant samples from _chain show up in self.samples.
-        self._assign_used_samples()
         return self
 
     def potential_scale_reduction(self):
@@ -422,8 +415,8 @@ class HMCDensityNetwork:
             layer_units=self.layer_units,
             layer_activations=self.layer_activations,
             transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
-            network_prior=self.network_prior,
-            noise_scale_prior=self.noise_scale_prior,
+            # network_prior=self.network_prior,
+            # noise_scale_prior=self.noise_scale_prior,
             sampler=self.sampler,
             num_burnin_steps=self.num_burnin_steps,
             step_size=self.step_size,
@@ -432,23 +425,45 @@ class HMCDensityNetwork:
             seed=self.seed,
         )
         fit_dict = dict(
-            _samples=self._samples,
             _chain=self._chain,
             _trace=self._trace,
             chain_mask=self.chain_mask,
             kernel_results=self.kernel_results,
         )
         dic = dict(init=init_dict, fit=fit_dict)
-        with open(save_path, "wb") as f:
-            pickle.dump(dic, f, -1)
+        pickle_large_object(save_path, dic)
 
 
-def hmc_density_network_from_save_path(save_path):
+def pickle_large_object(save_path, object):
+    """
+    Due to an error of python on OS X objects larger than 4GB cannot be pickled directly
+    (see bug https://stackoverflow.com/questions/31468117/python-3-can-pickle-handle-byte-objects-larger-than-4gb). This function is a workaround to pickle larger objects.
+    """
+    max_bytes = 2 ** 31 - 1
+    bytes_out = pickle.dumps(object)
+    with open(save_path, "wb") as f_out:
+        for idx in range(0, len(bytes_out), max_bytes):
+            f_out.write(bytes_out[idx : idx + max_bytes])
+
+
+def hmc_density_network_from_save_path(
+    save_path, network_prior=None, noise_scale_prior=None
+):
+    """
+    Recreates a hmc density network from a save-path. Unfortunately, tensorflow
+    probability distributions cannot reliably be pickled (specifically it doesn't work
+    for transformed distributions). Since the noise_scale_prior is often a transformed
+    distribution I chose not to save it to disk. Therefore it needs to be provided here
+    as an additional argument if you want to e.g. resume training or sample from the
+    prior. Don't worry about providing it if you only care about the saved network's
+    prediction.
+    """
     with open(save_path, "rb") as f:
         dic = pickle.load(f)
+    dic["init"]["network_prior"] = network_prior
+    dic["init"]["noise_scale_prior"] = noise_scale_prior
     hmc_net = HMCDensityNetwork(**dic["init"])
     fit_d = dic["fit"]
-    hmc_net._samples = fit_d["_samples"]
     hmc_net._chain = fit_d["_chain"]
     hmc_net._trace = fit_d["_trace"]
     hmc_net.chain_mask = fit_d["chain_mask"]
@@ -470,6 +485,7 @@ def mask_nonsense_chains(
     highest_acceptance_ratio=None,
     x_train=None,
     y_train=None,
+    thinning=1,
 ):
     """
     Function that takes an HMC network and masks some MCMC chains based on nonsensical
@@ -534,7 +550,7 @@ def mask_nonsense_chains(
     if x_train is not None:
         log_posterior = hmc_net._target_log_prob_fn_factory(x_train, y_train)
         log_posteriors = log_posterior(
-            *tf.nest.map_structure(lambda x: x, hmc_net.samples)
+            *tf.nest.map_structure(lambda x: x[::thinning], hmc_net.samples)
         )
         largest_min = tf.reduce_max(tf.reduce_min(log_posteriors, axis=0))
         highest_log_posterior_by_chain = tf.reduce_max(log_posteriors, axis=0)

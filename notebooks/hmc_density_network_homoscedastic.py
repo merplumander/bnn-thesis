@@ -70,10 +70,11 @@ bias_prior = weight_prior
 network_prior = make_independent_gaussian_network_prior(
     input_shape=input_shape, layer_units=layer_units, loc=0.0, scale=1.0
 )
-# noise_scale_prior = tfd.TransformedDistribution(
-#   distribution=tfd.InverseGamma([[3.]], 0.1),
-#   bijector=tfb.Invert(tfb.Square())) # Transforming an InverseGamma prior on the variance to a prior on the standard deviation.
-noise_scale_prior = tfd.Uniform(low=[[0.0]], high=2)
+noise_scale_prior = tfd.TransformedDistribution(
+    distribution=tfd.InverseGamma([[0.5]], 0.01),
+    bijector=tfp.bijectors.Invert(tfp.bijectors.Square()),
+)  # Transforming an InverseGamma prior on the variance to a prior on the standard deviation.
+# noise_scale_prior = tfd.Uniform(low=[[0.0]], high=2)
 
 # %% markdown
 # ### Let's first train a map network
@@ -124,7 +125,7 @@ net.noise_sigma
 
 # %%
 n_chains = 128
-num_burnin_steps = 500
+num_burnin_steps = 100
 num_results = 100
 
 
@@ -146,6 +147,7 @@ hmc_net = HMCDensityNetwork(
     step_size=step_size,
     num_leapfrog_steps=100,
     max_tree_depth=10,
+    num_steps_between_results=0,
     seed=0,
 )
 
@@ -190,6 +192,7 @@ current_state = prior_samples
 # %%
 hmc_net.fit(x_train, y_train, current_state=current_state, num_results=num_results)
 
+
 # %% markdown
 # When using only few samples in the MCMC Chains and especially if we start from random overdispersed samples from the prior many chains will not have converged yet. We can try to find chains with nonsense samples and mask them out. So far there are three masking criteria:
 # 1: median of the noise scales: Since we are using normalized y_train values, the maximum reasonable standard deviation we should expect is 1. I intentionally use a uniform prior between 0 and 2 and sort out all chains that have a median noise scale above one.
@@ -205,6 +208,7 @@ mask_nonsense_chains(
     highest_acceptance_ratio=0.9,
     x_train=x_train,
     y_train=y_train,
+    thinning=1,
 )
 hmc_net.samples[0].shape[:2]
 
@@ -241,7 +245,9 @@ save_path = save_dir.joinpath("deletable_toy_hmc_notebook")
 hmc_net.save(save_path)
 
 # %%
-hmc_net = hmc_density_network_from_save_path(save_path)
+hmc_net = hmc_density_network_from_save_path(
+    save_path, network_prior=network_prior, noise_scale_prior=noise_scale_prior
+)
 hmc_net._chain[0].shape
 
 
@@ -249,7 +255,7 @@ hmc_net._chain[0].shape
 # Resuming running the chains is also possible:
 
 # %%
-hmc_net.fit(x_train, y_train, num_results=1000, resume=True)
+hmc_net.fit(x_train, y_train, num_results=100, resume=True)
 hmc_net.samples[0].shape
 
 # %% markdown
@@ -341,7 +347,7 @@ acceptance_ratio
 # %%
 scales = transform_unconstrained_scale(
     hmc_net.samples[-1], factor=transform_unconstrained_scale_factor
-)
+)  # _chain[-1][num_burnin_steps:]
 _x = np.linspace(0, 1, 1000)
 fig, ax = plt.subplots(figsize=(8, 8))
 ax.hist(scales.numpy().flatten(), bins=200, density=True)
