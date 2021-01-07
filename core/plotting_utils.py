@@ -595,6 +595,7 @@ def plot_uci_single_benchmark(
 
 def plot_uci_ensemble_size_benchmark(
     model_results,
+    x=None,
     labels=None,
     title=None,
     x_label=None,
@@ -616,20 +617,27 @@ def plot_uci_ensemble_size_benchmark(
     for i, results, label, color in zip(
         range(len(model_results)), model_results, labels, colors
     ):
-        results = ak.Array(results)
-        size_split_means = np.mean(results, axis=2)
-        size_means = np.array(np.mean(size_split_means, axis=1))
-        size_split_stds = np.std(results, axis=2)
-        size_stds = np.array(np.mean(size_split_stds, axis=1))
-        print(size_means)
+        results = np.array(results)
+        size_means = np.mean(results, axis=1)
+        size_stds = np.std(results, axis=1)
+        if x is None:
+            x = np.arange(len(results)) + 1
+        x = x + 0.15 * i
+        #     results = ak.Array(results)
+        #     size_split_means = np.mean(results, axis=2)
+        #     size_means = np.array(np.mean(size_split_means, axis=1))
+        #     size_split_stds = np.std(results, axis=2)
+        #     size_stds = np.array(np.mean(size_split_stds, axis=1))
+        #     print(size_means)
         ax.errorbar(
-            np.arange(len(results)) + 1 + 0.15 * i,
+            x,
             size_means,
-            size_stds,
+            size_stds / np.sqrt(results.shape[1]),
             c=color,
             fmt="o",
             label=label,
         )
+        ax.plot(x, size_means, c=color)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_xlim(x_lim)
