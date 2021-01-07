@@ -193,32 +193,32 @@ class PostHocLastLayerBayesianNetwork:
             self.y_preprocessor = StandardizePreprocessor()
         names = [None] * (len(self.layer_units) - 2) + ["feature_extractor", "output"]
         tf.random.set_seed(self.seed)
-        if self.initial_unconstrained_scale is None:
-            self.network = MapNetwork(
-                self.input_shape,
-                self.layer_units,
-                self.layer_activations,
-                self.l2_weight_lambda,
-                self.l2_bias_lambda,
-                preprocess_x=self.preprocess_x,
-                learning_rate=self.learning_rate,
-                names=names,
-                seed=self.seed,
-            )
-        else:
-            self.network = MapDensityNetwork(
-                self.input_shape,
-                self.layer_units,
-                self.layer_activations,
-                self.initial_unconstrained_scale,
-                self.transform_unconstrained_scale_factor,
-                self.l2_weight_lambda,
-                self.l2_bias_lambda,
-                preprocess_x=self.preprocess_x,
-                learning_rate=self.learning_rate,
-                names=names,
-                seed=self.seed,
-            )
+        # if self.initial_unconstrained_scale is None:
+        #     self.network = MapNetwork(
+        #         self.input_shape,
+        #         self.layer_units,
+        #         self.layer_activations,
+        #         self.l2_weight_lambda,
+        #         self.l2_bias_lambda,
+        #         preprocess_x=self.preprocess_x,
+        #         learning_rate=self.learning_rate,
+        #         names=names,
+        #         seed=self.seed,
+        #     )
+        # else:
+        self.network = MapDensityNetwork(
+            self.input_shape,
+            self.layer_units,
+            self.layer_activations,
+            self.initial_unconstrained_scale,
+            self.transform_unconstrained_scale_factor,
+            self.l2_weight_lambda,
+            self.l2_bias_lambda,
+            preprocess_x=self.preprocess_x,
+            learning_rate=self.learning_rate,
+            names=names,
+            seed=self.seed,
+        )
 
     @property
     def total_epochs(self):

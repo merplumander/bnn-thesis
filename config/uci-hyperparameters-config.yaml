@@ -2,8 +2,8 @@ train_seed: 0
 n_networks: 10
 layer_units: [50, 1]
 layer_activations: ["relu", "linear"]
-weight_prior_scale: 1
-bias_prior_scale: 1
+weight_prior_scale: 1.
+bias_prior_scale: 1.
 noise_var_prior_a: 0.5
 noise_var_prior_b: 0.01
 initial_unconstrained_scale: -1

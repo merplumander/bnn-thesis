@@ -1,12 +1,11 @@
 import numpy as np
 
 
-def check_posterior_equivalence(map_net, hmc_net, x, y):
+def check_posterior_equivalence(map_net, hmc_net, x, y, n_train):
     """
     Takes a MapDensityNetwork, an HMCDensityNetwork and some x and y values and checks
     whether the map loss is equivalent to the unnormalized log posterior probability.
     """
-    n_train = x.shape[0]
     map_loss = map_net.evaluate(x, y)
     map_prob = -map_loss * n_train
     weights = map_net.get_weights()

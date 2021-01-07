@@ -638,15 +638,18 @@ def map_density_network_from_save_path(save_path, noise_scale_prior=None):
     Recreates a map density network from a save-path. Unfortunately, tensorflow
     probability distributions cannot reliably be pickled (specifically it doesn't work
     for transformed distributions). Since the noise_scale_prior is often a transformed
-    distribution I chose not to save it two disk. Therefore it needs to be provided here
+    distribution I chose not to save it to disk. Therefore it needs to be provided here
     as an additional argument if you want to e.g. resume training or sample from the
-    prior. Don't worry about providing it if you only care about the saved networks
+    prior. Don't worry about providing it if you only care about the saved network's
     prediction.
     """
     with open(save_path, "rb") as f:
         dic = pickle.load(f)
     dic["init"]["noise_scale_prior"] = noise_scale_prior
     net = map_density_network_from_save_dic(dic)
+    print(
+        'Noise_scale_prior is not preserved when saving and loading a model. If you intend to train further please provide noise scale prior to "map_density_network_from_save_path".'
+    )
     print("Training history is not preserved when saving and loading a model.")
     print(
         "When resuming training on this model, check wether the optimizers state is set correctly. Likely it starts from step 0 again. Which might be a problem for LearningRateSchedules."
