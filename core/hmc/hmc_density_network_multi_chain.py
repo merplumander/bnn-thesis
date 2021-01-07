@@ -18,6 +18,141 @@ from ..network_utils import (
 tfd = tfp.distributions
 
 
+class MixtureSameFamilySampleFix(tfd.MixtureSameFamily):
+    """
+    Sampling from MixtureSameFamily is currently really inefficient in terms of
+    computation time and memory. See tensorflow probability issue:
+    https://github.com/tensorflow/probability/issues/1208 .
+    This is a quick and dirty work around fix for that.
+    """
+
+    def _sample_n(self, n, seed):
+        # only for MixtureSameFamilySampleFix
+        import warnings
+        from tensorflow_probability.python.distributions import independent
+        from tensorflow_probability.python.internal import dtype_util
+        from tensorflow_probability.python.internal import prefer_static
+        from tensorflow_probability.python.internal import samplers
+        from tensorflow_probability.python.internal import tensorshape_util
+        from tensorflow_probability.python.util.seed_stream import SeedStream
+        from tensorflow_probability.python.util.seed_stream import (
+            TENSOR_SEED_MSG_PREFIX,
+        )
+
+        components_seed, mix_seed = samplers.split_seed(seed, salt="MixtureSameFamily")
+        try:
+            seed_stream = SeedStream(seed, salt="MixtureSameFamily")
+        except TypeError as e:  # Can happen for Tensor seeds.
+            seed_stream = None
+            seed_stream_err = e
+        try:
+            mix_sample = self.mixture_distribution.sample(
+                n, seed=mix_seed
+            )  # [n, B] or [n]
+        except TypeError as e:
+            if "Expected int for argument" not in str(
+                e
+            ) and TENSOR_SEED_MSG_PREFIX not in str(e):
+                raise
+            if seed_stream is None:
+                raise seed_stream_err
+            msg = (
+                "Falling back to stateful sampling for `mixture_distribution` "
+                "{} of type `{}`. Please update to use `tf.random.stateless_*` "
+                "RNGs. This fallback may be removed after 20-Aug-2020. ({})"
+            )
+            warnings.warn(
+                msg.format(
+                    self.mixture_distribution.name,
+                    type(self.mixture_distribution),
+                    str(e),
+                )
+            )
+            mix_sample = self.mixture_distribution.sample(
+                n, seed=seed_stream()
+            )  # [n, B] or [n]
+        _seed = int(components_seed[0].numpy())
+        ret = tf.stack(
+            [
+                self.components_distribution[i_component.numpy()].sample(seed=_seed + i)
+                for i, i_component in enumerate(mix_sample)
+            ],
+            axis=0,
+        )
+        return ret
+        # try:
+        #   x = self.components_distribution.sample(  # [n, B, k, E]
+        #       n, seed=components_seed)
+        #   if seed_stream is not None:
+        #     seed_stream()  # Advance even if unused.
+        # except TypeError as e:
+        #   if ('Expected int for argument' not in str(e) and
+        #       TENSOR_SEED_MSG_PREFIX not in str(e)):
+        #     raise
+        #   if seed_stream is None:
+        #     raise seed_stream_err
+        #   msg = ('Falling back to stateful sampling for `components_distribution` '
+        #          '{} of type `{}`. Please update to use `tf.random.stateless_*` '
+        #          'RNGs. This fallback may be removed after 20-Aug-2020. {}')
+        #   warnings.warn(msg.format(self.components_distribution.name,
+        #                            type(self.components_distribution),
+        #                            str(e)))
+        #   x = self.components_distribution.sample(  # [n, B, k, E]
+        #       n, seed=seed_stream())
+        #
+        # event_shape = None
+        # event_ndims = tensorshape_util.rank(self.event_shape)
+        # if event_ndims is None:
+        #   event_shape = self.components_distribution.event_shape_tensor()
+        #   event_ndims = prefer_static.rank_from_shape(event_shape)
+        # event_ndims_static = tf.get_static_value(event_ndims)
+        #
+        # num_components = None
+        # if event_ndims_static is not None:
+        #   num_components = tf.compat.dimension_value(
+        #       x.shape[-1 - event_ndims_static])
+        # # We could also check if num_components can be computed statically from
+        # # self.mixture_distribution's logits or probs.
+        # if num_components is None:
+        #   num_components = tf.shape(x)[-1 - event_ndims]
+        #
+        # # TODO(jvdillon): Consider using tf.gather (by way of index unrolling).
+        # npdt = dtype_util.as_numpy_dtype(x.dtype)
+        #
+        # mask = tf.one_hot(
+        #     indices=mix_sample,  # [n, B] or [n]
+        #     depth=num_components,
+        #     on_value=npdt(1),
+        #     off_value=npdt(0))    # [n, B, k] or [n, k]
+        #
+        # # Pad `mask` to [n, B, k, [1]*e] or [n, [1]*b, k, [1]*e] .
+        # batch_ndims = prefer_static.rank(x) - event_ndims - 1
+        # mask_batch_ndims = prefer_static.rank(mask) - 1
+        # pad_ndims = batch_ndims - mask_batch_ndims
+        # mask_shape = prefer_static.shape(mask)
+        # mask = tf.reshape(
+        #     mask,
+        #     shape=prefer_static.concat([
+        #         mask_shape[:-1],
+        #         prefer_static.ones([pad_ndims], dtype=tf.int32),
+        #         mask_shape[-1:],
+        #         prefer_static.ones([event_ndims], dtype=tf.int32),
+        #     ], axis=0))
+        #
+        # if x.dtype in [tf.bfloat16, tf.float16, tf.float32, tf.float64,
+        #                tf.complex64, tf.complex128]:
+        #   masked = tf.math.multiply_no_nan(x, mask)
+        # else:
+        #   masked = x * mask
+        # ret = tf.reduce_sum(masked, axis=-1 - event_ndims)  # [n, B, E]
+        #
+        # if self._reparameterize:
+        #   if event_shape is None:
+        #     event_shape = self.components_distribution.event_shape_tensor()
+        #   ret = self._reparameterize_sample(ret, event_shape=event_shape)
+        # return ret
+
+
 class HMCDensityNetwork:
     def __init__(
         self,
@@ -272,7 +407,6 @@ class HMCDensityNetwork:
         return self
 
     def potential_scale_reduction(self):
-        print(self.samples[0].shape)
         return tfp.mcmc.potential_scale_reduction(self.samples)
 
     def effective_sample_size(self, thinning=1):
@@ -338,18 +472,40 @@ class HMCDensityNetwork:
         return self.predict_mixture_of_gaussians(x, thinning=thinning)
 
     def predict_mixture_of_gaussians(self, x, thinning=1):
-        prediction = self._base_predict(x, thinning=thinning)
-        n_samples = prediction.batch_shape[0]
-        prediction = tfp.distributions.BatchReshape(
-            prediction, (n_samples * self.n_used_chains,)
+        samples = self.thinned_samples(thinning=thinning)
+        samples = tf.nest.map_structure(
+            lambda x: tf.reshape(x, shape=(x.shape[0] * x.shape[1],) + x.shape[2:]),
+            samples,
         )
+        n_samples = samples[0].shape[0]
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            samples
+        )
+        model = build_scratch_density_model(
+            weights,
+            self.layer_activation_functions,
+            self.transform_unconstrained_scale_factor,
+            unconstrained_noise_scale,
+        )
+        prediction = model(x)
+        cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
+        predictive_mixture = MixtureSameFamilySampleFix(cat, prediction)
+        # predictive_mixture = tfd.MixtureSameFamily(cat, prediction)
 
-        cat = tfp.distributions.Categorical(
-            probs=tf.ones((n_samples * self.n_used_chains,))
-            / (n_samples * self.n_used_chains)
-        )
-        predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
         return predictive_mixture
+        # The following way of doing the prediction does not work in some cases due to tensorflow issue https://github.com/tensorflow/probability/issues/1206
+        # prediction = self._base_predict(x, thinning=thinning)
+        # n_samples = prediction.batch_shape[0]
+        # prediction = tfp.distributions.BatchReshape(
+        #     prediction, (n_samples * self.n_used_chains,)
+        # )
+        #
+        # cat = tfp.distributions.Categorical(
+        #     probs=tf.ones((n_samples * self.n_used_chains,))
+        #     / (n_samples * self.n_used_chains)
+        # )
+        # predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
+        # return predictive_mixture
 
     def predict_chains(self, x, thinning=1):
         prediction = self._base_predict(x, thinning=thinning)
@@ -359,7 +515,8 @@ class HMCDensityNetwork:
         )
 
         cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
-        predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
+        predictive_mixture = MixtureSameFamilySampleFix(cat, prediction)
+        # predictive_mixture = tfd.MixtureSameFamily(cat, prediction)
         return predictive_mixture
 
     def predict_individual_chain(self, x, i_chain, thinning=1):
@@ -377,7 +534,8 @@ class HMCDensityNetwork:
         )
         prediction = model(x)
         cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
-        predictive_mixture = tfp.distributions.MixtureSameFamily(cat, prediction)
+        predictive_mixture = MixtureSameFamilySampleFix(cat, prediction)
+        # predictive_mixture = tfd.MixtureSameFamily(cat, prediction)
         return predictive_mixture
 
     def predict_random_sample(self, x, seed=0):
@@ -390,6 +548,52 @@ class HMCDensityNetwork:
         )
         sample = tf.nest.map_structure(lambda x: x[i_sample, i_chain], self.samples)
         return self.predict_from_sample_parameters(x, sample)
+
+    def predict_individual_chain_start_stop_indices(
+        self, x, i_chain, start_index, stop_index, thinning=1
+    ):
+        samples = self.thinned_samples(thinning=thinning)
+        n_samples = samples[0].shape[0]
+        samples = tf.nest.map_structure(lambda x: x[:, i_chain], samples)
+        samples = tf.nest.map_structure(
+            lambda x: x[int(start_index / thinning) : int(stop_index / thinning)],
+            samples,
+        )
+        n_samples = samples[0].shape[0]
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            samples
+        )
+        model = build_scratch_density_model(
+            weights,
+            self.layer_activation_functions,
+            self.transform_unconstrained_scale_factor,
+            unconstrained_noise_scale,
+        )
+        prediction = model(x)
+        cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
+        predictive_mixture = MixtureSameFamilySampleFix(cat, prediction)
+        # predictive_mixture = tfd.MixtureSameFamily(cat, prediction)
+        return predictive_mixture
+
+    def predict_from_indices(self, x, indices):
+        samples = tf.nest.map_structure(
+            lambda x: tf.gather_nd(x, indices), self.samples
+        )
+        n_samples = samples[0].shape[0]
+        weights, unconstrained_noise_scale = self._split_sample_weights_and_noise_scale(
+            samples
+        )
+        model = build_scratch_density_model(
+            weights,
+            self.layer_activation_functions,
+            self.transform_unconstrained_scale_factor,
+            unconstrained_noise_scale,
+        )
+        prediction = model(x)
+        cat = tfp.distributions.Categorical(probs=tf.ones((n_samples,)) / n_samples)
+        # predictive_mixture = MixtureSameFamilySampleFix(cat, prediction)
+        predictive_mixture = tfd.MixtureSameFamily(cat, prediction)
+        return predictive_mixture
 
     # very useful for debugging
     def predict_from_sample_parameters(self, x, sample_parameters):
@@ -422,6 +626,7 @@ class HMCDensityNetwork:
             step_size=self.step_size,
             num_leapfrog_steps=self.num_leapfrog_steps,
             max_tree_depth=self.max_tree_depth,
+            num_steps_between_results=self.num_steps_between_results,
             seed=self.seed,
         )
         fit_dict = dict(
