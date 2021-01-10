@@ -1,2 +1,2 @@
 # bnn-thesis
-Master thesis about Bayesian neural networks
+Master thesis about approximating Bayesian neural networks with ensembling methods.
