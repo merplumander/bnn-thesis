@@ -1,4 +1,5 @@
 import numpy as np
+import ot
 import tensorflow as tf
 from scipy.stats import wasserstein_distance
 
@@ -62,6 +63,8 @@ def predictive_distribution_wasserstein_distance(
     for i_test_point in range(predictive_samples1.shape[1]):
         samples1 = predictive_samples1[:, i_test_point]
         samples2 = predictive_samples2[:, i_test_point]
-        wd = wasserstein_distance(samples1, samples2)
+        # ot's  Wasserstein distance is about 30% faster than scipy's
+        # wd = wasserstein_distance(samples1, samples2)
+        wd = ot.wasserstein_1d(samples1, samples2, p=1)
         wds.append(wd)
     return np.mean(wds)
