@@ -2,6 +2,38 @@ import numpy as np
 import tensorflow as tf
 from scipy.stats import wasserstein_distance
 
+from core.preprocessing import StandardPreprocessor
+from data.uci import load_uci_data
+
+
+def normalize_rmse(rmse, y_normalization_scale):
+    return rmse / y_normalization_scale
+
+
+def backtransform_normalized_rmse(normalized_rmse, y_normalization_scale):
+    return normalized_rmse * y_normalization_scale
+
+
+def normalize_ll(ll, y_normalization_scale):
+    log_scale = np.log(y_normalization_scale)
+    return ll - log_scale
+
+
+def backtransform_normalized_ll(normalized_ll, y_normalization_scale):
+    log_scale = np.log(y_normalization_scale)
+    return normalized_ll + log_scale
+
+
+def get_y_normalization_scales(dataset):
+    _x, _y, train_indices, _, test_indices = load_uci_data(f"{dataset}")
+    y_normalization_scales = []
+    for i_split in range(len(train_indices)):
+        _y_train = _y[train_indices[i_split]].reshape(-1, 1)
+        y_preprocessor = StandardPreprocessor()
+        y_preprocessor.fit(_y_train)
+        y_normalization_scales.append(y_preprocessor.scaler.scale_)
+    return np.array(y_normalization_scales)
+
 
 def rmse(prediction, y):
     return tf.math.sqrt(tf.reduce_mean((prediction - y) ** 2))
