@@ -596,12 +596,17 @@ def plot_uci_single_benchmark(
 def plot_uci_ensemble_size_benchmark(
     model_results,
     x=None,
+    x_add_jitter=0.0,
+    normalization=False,
+    errorbars=True,
+    pareto_point=False,
     labels=None,
     title=None,
     x_label=None,
     y_label=None,
     x_lim=None,
     colors=None,
+    alpha=1.0,
     fig=None,
     ax=None,
     save_path=None,
@@ -620,6 +625,11 @@ def plot_uci_ensemble_size_benchmark(
         results = np.array(results)
         size_means = np.mean(results, axis=1)
         size_stds = np.std(results, axis=1)
+        if normalization:
+            min = np.min(size_means)
+            max = np.max(size_means)
+            size_means = (size_means - min) / (max - min)
+            size_stds = size_stds / (max - min)
         if x is None:
             x = np.arange(len(results)) + 1
         x = x + 0.15 * i
@@ -629,15 +639,18 @@ def plot_uci_ensemble_size_benchmark(
         #     size_split_stds = np.std(results, axis=2)
         #     size_stds = np.array(np.mean(size_split_stds, axis=1))
         #     print(size_means)
-        ax.errorbar(
-            x,
-            size_means,
-            size_stds / np.sqrt(results.shape[1]),
-            c=color,
-            fmt="o",
-            label=label,
-        )
-        ax.plot(x, size_means, c=color)
+        if errorbars:
+            ax.errorbar(
+                x + x_add_jitter,
+                size_means,
+                size_stds / np.sqrt(results.shape[1]),
+                c=color,
+                fmt="o",
+                alpha=alpha,
+            )
+        ax.plot(x + x_add_jitter, size_means, c=color, alpha=alpha, label=label)
+    if pareto_point:
+        ax.scatter(10, 0.2, c="k", label="80/20 point")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_xlim(x_lim)
