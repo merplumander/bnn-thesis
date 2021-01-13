@@ -52,7 +52,12 @@ dataset = "yacht"
 data_seed = 0
 dataset_name = f"{dataset}_{data_seed + 1:02}"
 
-save_dir = f".save_uci_models/hmc-map-ensemble-comparison/{dataset_name}"
+n_hidden_layers = 2
+hidden_layers_string = (
+    "two-hidden-layers" if n_hidden_layers == 2 else "one-hidden-layer"
+)
+
+save_dir = f".save_uci_models/hmc-map-ensemble-comparison/{hidden_layers_string}/{dataset_name}"
 save_dir = Path(save_dir)
 save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -77,8 +82,13 @@ with open("config/uci-hyperparameters-config.yaml") as f:
     experiment_config = yaml.full_load(f)
 
 train_seed = experiment_config["train_seed"]
-layer_units = [50, 50, 1]  # experiment_config["layer_units"]
+layer_units = experiment_config["layer_units"]
 layer_activations = experiment_config["layer_activations"]
+if n_hidden_layers == 2:
+    layer_units.insert(0, layer_units[0])
+    layer_activations.insert(0, layer_activations[0])
+    assert layer_units == [50, 50, 1]
+    assert layer_activations == ["relu", "relu", "linear"]
 initial_unconstrained_scale = experiment_config["initial_unconstrained_scale"]
 transform_unconstrained_scale_factor = experiment_config[
     "transform_unconstrained_scale_factor"
@@ -126,7 +136,7 @@ num_steps_between_results = 4  # only every fifth sample is saved
 
 sampler = "hmc"
 num_leapfrog_steps = 100
-_step_size = 0.1
+_step_size = 0.01
 step_size = [np.ones((n_chains, 1, 1)) * _step_size] * (
     len(layer_units) * 2 + 1  # + 1 for the noise sigma "layer"
 )  # Individual step sizes for all chains and all layers
@@ -220,6 +230,12 @@ hmc_net.leapfrog_steps_taken()
 
 # %%
 print("Potential Scale Reduction")
+
+weights_reduction = hmc_net.potential_scale_reduction()
+print(
+    f"Weight Space (Max per layer): {tf.nest.map_structure(lambda x: tf.reduce_max(x).numpy(), weights_reduction)}"
+)
+
 
 predictive_mean_reduction = tfp.mcmc.potential_scale_reduction(
     hmc_net._base_predict(x_train, thinning=20).mean(), split_chains=False
