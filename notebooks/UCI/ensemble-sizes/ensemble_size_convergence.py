@@ -23,11 +23,23 @@ figure_dir = Path(figure_dir)
 figure_dir.mkdir(parents=True, exist_ok=True)
 
 # %%
+n_hidden_layers = 2
+hidden_layers_string = (
+    "two-hidden-layers" if n_hidden_layers == 2 else "one-hidden-layer"
+)
+
+ensemble_n_networks = 50
+
 with open("config/uci-hyperparameters-config.yaml") as f:
     experiment_config = yaml.full_load(f)
 
 
-ensemble_n_networks = 50
+layer_units = experiment_config["layer_units"]
+layer_activations = experiment_config["layer_activations"]
+if n_hidden_layers == 2:
+    layer_units.insert(0, layer_units[0])
+    layer_activations.insert(0, layer_activations[0])
+
 weight_prior = tfd.Normal(0, experiment_config["weight_prior_scale"])
 bias_prior = tfd.Normal(0, experiment_config["bias_prior_scale"])
 a = experiment_config["noise_var_prior_a"]
@@ -44,11 +56,11 @@ early_stop_callback = tf.keras.callbacks.EarlyStopping(
     monitor="loss", patience=patience, verbose=0, restore_best_weights=False
 )
 
-experiment_name = f"uci_ensemble-size-convergence_one-hidden-layer"
+experiment_name = f"uci_ensemble-size-convergence_{hidden_layers_string}"
 kwargs = dict(
     train_seed=experiment_config["train_seed"],
-    layer_units=experiment_config["layer_units"],
-    layer_activations=experiment_config["layer_activations"],
+    layer_units=layer_units,
+    layer_activations=layer_activations,
     initial_unconstrained_scale=experiment_config["initial_unconstrained_scale"],
     transform_unconstrained_scale_factor=experiment_config[
         "transform_unconstrained_scale_factor"
@@ -58,7 +70,7 @@ kwargs = dict(
     batch_size=experiment_config["batch_size"],
     use_gap_data=False,
     experiment_name=experiment_name,
-    model_save_dir=".save_uci_models",
+    model_save_dir=f".save_uci_models/{hidden_layers_string}",
     n_networks=ensemble_n_networks,
     early_stop_callback=early_stop_callback,
     weight_prior=weight_prior,
@@ -112,8 +124,8 @@ results = uci_benchmark_ensemble_sizes_save_plot(dataset=dataset, **kwargs)
 
 
 # %%
-kwargs["experiment_name"] = f"uci-gap_ensemble-size-convergence_one-hidden-layer"
-kwargs["use_gap_data"] = (True,)
+kwargs["experiment_name"] = f"uci-gap_ensemble-size-convergence_{hidden_layers_string}"
+kwargs["use_gap_data"] = True
 
 # %%
 dataset = "boston"
