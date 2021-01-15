@@ -43,26 +43,31 @@ datasets = [
     "yacht",
 ]
 
+
+# %%
+gap_data = True
+n_networks = 50
+
+if gap_data:
+    data_dir = "uci_gap_data"
+    experiment_name = f"uci-gap_ensemble-size-convergence_one-hidden-layer"
+else:
+    data_dir = "uci_data"
+    experiment_name = f"uci_ensemble-size-convergence_one-hidden-layer"
+
+
 # %% markdown
 
 
 # %%
-n_networks = 50
-# experiment_name = "uci_ensemble-size-convergence_one-hidden-layer"
-experiment_name = "uci-gap_ensemble-size-convergence_one-hidden-layer"
-
-
 _net_sizes = np.arange(n_networks) + 1.0
 _net_sizes = _net_sizes[np.logical_or(_net_sizes <= 20, _net_sizes % 5 == 0)]
 for dataset in datasets[2:3]:
-    # experiment_path = Path(
-    #     f"uci_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
-    # )
     experiment_path = Path(
-        f"uci_gap_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+        f"{data_dir}/{dataset}/results/ensemble_sizes/{experiment_name}.json"
     )
 
-    y_normalization_scales = get_y_normalization_scales(dataset).T
+    y_normalization_scales = get_y_normalization_scales(dataset, gap_data=gap_data).T
     y_normalization_scales.shape
 
     results = json.loads(experiment_path.read_text())
@@ -100,26 +105,19 @@ for dataset in datasets[2:3]:
 
 
 # %%
-n_networks = 50
-# experiment_name = "uci_ensemble-size-convergence_one-hidden-layer"
-experiment_name = "uci-gap_ensemble-size-convergence_one-hidden-layer"
-
-
 _net_sizes = np.arange(n_networks) + 1.0
 _net_sizes = _net_sizes[np.logical_or(_net_sizes <= 20, _net_sizes % 5 == 0)]
+
 fig, ax = plt.subplots(figsize=(15, 6))
 pareto_point = True
 method = "Ensemble"
 metric = "NLLs"
 for i, dataset in enumerate(datasets[:]):
-    # experiment_path = Path(
-    #     f"uci_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
-    # )
     experiment_path = Path(
-        f"uci_gap_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+        f"{data_dir}/{dataset}/results/ensemble_sizes/{experiment_name}.json"
     )
 
-    y_normalization_scales = get_y_normalization_scales(dataset).T
+    y_normalization_scales = get_y_normalization_scales(dataset, gap_data=gap_data).T
     y_normalization_scales.shape
 
     results = json.loads(experiment_path.read_text())
@@ -149,4 +147,4 @@ for i, dataset in enumerate(datasets[:]):
 save_path = figure_dir.joinpath(
     f"uci-gap_ensemble-sizes_{experiment_name}_{method}_{metric}.pdf"
 )
-fig.savefig(save_path, bbox_inches="tight")
+# fig.savefig(save_path, bbox_inches="tight")

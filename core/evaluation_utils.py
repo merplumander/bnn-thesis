@@ -25,8 +25,8 @@ def backtransform_normalized_ll(normalized_ll, y_normalization_scale):
     return normalized_ll + log_scale
 
 
-def get_y_normalization_scales(dataset):
-    _x, _y, train_indices, _, test_indices = load_uci_data(f"{dataset}")
+def get_y_normalization_scales(dataset, gap_data=False):
+    _x, _y, train_indices, _, test_indices = load_uci_data(f"{dataset}", gap_data=gap_data)
     y_normalization_scales = []
     for i_split in range(len(train_indices)):
         _y_train = _y[train_indices[i_split]].reshape(-1, 1)
