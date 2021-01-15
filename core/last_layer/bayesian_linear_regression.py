@@ -59,6 +59,12 @@ class BayesianLinearRegression:
             np.sqrt(np.diag(dispersion)),
         )  # stats.t(df, loc=mean, scale=scale)
 
+    def unconditional_w_t(self):
+        df = int(2 * self.a_n)
+        mean = self.mu_n.flatten()
+        dispersion = (self.b_n / self.a_n) * self.V_n
+        return df, mean, dispersion
+
     def sample_sigma(self, seed=0):
         np.random.seed(seed)
         ig = stats.invgamma(a=self.a_n, scale=self.b_n)

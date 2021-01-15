@@ -325,6 +325,8 @@ class PostHocLastLayerBayesianNetwork:
         Returns the weights of all layers including the one that is discarded and the marginal t distribution
         of the last layer weights.
         """
-        df, loc, scale = self.blr_model.get_marginal_beta()
-        last_layer_weight_distribution = tfd.StudentT(df=df, loc=loc, scale=scale)
+        df, loc, dispersion = self.blr_model.unconditional_w_t()
+        last_layer_weight_distribution = tfd.StudentT(
+            df=df, loc=loc, scale=tf.linalg.tensor_diag_part(dispersion) ** 0.5
+        )
         return self.network.get_weights(), last_layer_weight_distribution
