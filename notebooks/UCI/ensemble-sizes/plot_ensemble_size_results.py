@@ -10,6 +10,11 @@ import numpy as np
 import seaborn as sns
 import yaml
 
+from core.evaluation_utils import (
+    get_y_normalization_scales,
+    normalize_ll,
+    normalize_rmse,
+)
 from core.plotting_utils import (
     plot_uci_ensemble_size_benchmark,
     plot_uci_single_benchmark,
@@ -31,7 +36,7 @@ datasets = [
     "concrete",
     "energy",
     "kin8nm",
-    # "naval",
+    "naval",
     "power",
     "protein",
     "wine",
@@ -42,35 +47,106 @@ datasets = [
 
 
 # %%
-patience = 20
-n_comb_max = 25
-experiment_name = f"ensemble-sizes_l2-convergence_n-comb-{n_comb_max}_early-stop-patience-{patience}_one-hidden-layer"
+n_networks = 50
+# experiment_name = "uci_ensemble-size-convergence_one-hidden-layer"
+experiment_name = "uci-gap_ensemble-size-convergence_one-hidden-layer"
 
-for dataset in datasets:
+
+_net_sizes = np.arange(n_networks) + 1.0
+_net_sizes = _net_sizes[np.logical_or(_net_sizes <= 20, _net_sizes % 5 == 0)]
+for dataset in datasets[2:3]:
+    # experiment_path = Path(
+    #     f"uci_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+    # )
     experiment_path = Path(
-        f"uci_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+        f"uci_gap_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
     )
+
+    y_normalization_scales = get_y_normalization_scales(dataset).T
+    y_normalization_scales.shape
+
     results = json.loads(experiment_path.read_text())
 
-    e_rmses = results["Ensemble"][
-        "RMSEs"
-    ]  # n_ensemble_members, n_splits, n_different_ensembles
-    e_nlls = results["Ensemble"]["NLLs"]
-    e_mm_nlls = results["Ensemble"]["MM-NLLs"]
-    llbe_rmses = results["LLB Ensemble"]["RMSEs"]
-    llbe_nlls = results["LLB Ensemble"]["NLLs"]
-    llbe_mm_nlls = results["LLB Ensemble"]["MM-NLLs"]
-    labels = ["Ensemble MM", "Ensemble", "LLB Ensemble MM", "LLB Ensemble"]
+    e_rmses = np.array(
+        results["Ensemble"]["RMSEs"]
+    )  # n_ensemble_members, n_splits, n_different_ensembles
+    # e_rmses = normalize_rmse(e_rmses, y_normalization_scales)
+    e_nlls = np.array(results["Ensemble"]["NLLs"])
+    # e_nlls = normalize_ll(e_nlls, y_normalization_scales)
 
+    # e_mm_nlls = results["Ensemble"]["MM-NLLs"]
+    llbe_rmses = np.array(results["LLB Ensemble"]["RMSEs"])
+    # llbe_rmses = normalize_rmse(llbe_rmses, y_normalization_scales)
+    llbe_nlls = np.array(results["LLB Ensemble"]["NLLs"])
+    # llbe_nlls = normalize_ll(llbe_nlls, y_normalization_scales)
+    # llbe_mm_nlls = results["LLB Ensemble"]["MM-NLLs"]
+    labels = ["Ensemble", "LLB Ensemble"]
+
+    fig, ax = plt.subplots(figsize=(15, 5))
     plot_uci_ensemble_size_benchmark(
-        [e_mm_nlls, e_nlls, llbe_mm_nlls, llbe_nlls],
+        [e_rmses, llbe_rmses],
+        x=_net_sizes,
         labels=labels,
         title=dataset,
+        fig=fig,
+        ax=ax,
         x_label="# ensemble_memebers",
         y_label="Negative Log Likelihood",
-        x_lim=[None, n_comb_max],
         colors=[colors[color_mapping[method]] for method in labels],
-        save_path=figure_dir.joinpath(
-            f"uci_ensemble-sizes_{dataset}_{experiment_name}.pdf"
-        ),
+        # save_path=figure_dir.joinpath(
+        #     f"uci_ensemble-sizes_{dataset}_{experiment_name}.pdf"
+        # ),
     )
+
+
+# %%
+n_networks = 50
+# experiment_name = "uci_ensemble-size-convergence_one-hidden-layer"
+experiment_name = "uci-gap_ensemble-size-convergence_one-hidden-layer"
+
+
+_net_sizes = np.arange(n_networks) + 1.0
+_net_sizes = _net_sizes[np.logical_or(_net_sizes <= 20, _net_sizes % 5 == 0)]
+fig, ax = plt.subplots(figsize=(15, 6))
+pareto_point = True
+method = "Ensemble"
+metric = "NLLs"
+for i, dataset in enumerate(datasets[:]):
+    # experiment_path = Path(
+    #     f"uci_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+    # )
+    experiment_path = Path(
+        f"uci_gap_data/{dataset}/results/ensemble_sizes/{experiment_name}.json"
+    )
+
+    y_normalization_scales = get_y_normalization_scales(dataset).T
+    y_normalization_scales.shape
+
+    results = json.loads(experiment_path.read_text())
+    results = np.array(
+        results[method][metric]
+    )  # n_ensemble_members, n_splits, n_different_ensembles
+
+    labels = [f"{dataset}"]
+    y_label = "RMSE" if metric == "RMSEs" else "Negative log likelihood"
+    plot_uci_ensemble_size_benchmark(
+        [results],
+        normalization=True,
+        x=_net_sizes,
+        x_add_jitter=0.01 * i,
+        errorbars=False,
+        pareto_point=pareto_point,
+        labels=labels,
+        title=method + " " + metric,
+        fig=fig,
+        ax=ax,
+        x_label="# ensemble_memebers",
+        y_label=y_label,
+        colors=[colors[i]],
+        alpha=0.6,
+    )
+    pareto_point = False
+save_path = figure_dir.joinpath(
+    f"uci-gap_ensemble-sizes_{experiment_name}_{method}_{metric}.pdf"
+)
+fig.savefig(save_path, bbox_inches="tight")
