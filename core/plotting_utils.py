@@ -357,12 +357,18 @@ def plot_weight_space_first_vs_last_layer(
     distribution_first=None,
     distribution_last=None,
     ensemble_distributions_last=None,
+    x1_label=None,
+    y1_label=None,
+    x2_label=None,
+    y2_label=None,
+    no_ticks=True,
     fig_title="",
     y_lim1=None,
     y_lim2=None,
     save_path=None,
 ):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    fig.subplots_adjust(hspace=0, wspace=0.05)
     fig.suptitle(fig_title, fontsize=15)
     ax1.set_title("Input to hidden layer weight")
     plot_weight_space_histogram(
@@ -375,6 +381,8 @@ def plot_weight_space_first_vs_last_layer(
         point_estimate=point_estimate_first,
         ensemble_point_estimates=ensemble_point_estimates_first,
         distribution=distribution_first,
+        x_label=x1_label,
+        y_label=y1_label,
         fig=fig,
         ax=ax1,
     )
@@ -391,10 +399,13 @@ def plot_weight_space_first_vs_last_layer(
         ensemble_point_estimates=ensemble_point_estimates_last,
         distribution=distribution_last,
         ensemble_distributions=ensemble_distributions_last,
+        x_label=x2_label,
+        y_label=y2_label,
         fig=fig,
         ax=ax2,
     )
     ax2.set_ylim(y_lim2)
+    plt.tight_layout()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
 
@@ -411,12 +422,16 @@ def plot_weight_space_histogram(
     distribution=None,
     ensemble_colour_indices=None,
     ensemble_distributions=None,
+    x_label=None,
+    y_label=None,
+    no_ticks=True,
     fig=None,
     ax=None,
     save_path=None,
 ):
-    # point_estimate_width = 6
-    # factor_height_point_estimate = 1.0
+    point_estimate_width = 1.0
+    factor_height_point_estimate = 1.1
+
     if fig is None and ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
     # The KDE bandwidth should be wider, the wider the range is.
@@ -432,54 +447,83 @@ def plot_weight_space_histogram(
         x_plot = np.linspace(x_min - 0.1 * d, x_max + 0.1 * d, 1000)
     kde_sample_density = np.exp(kde.score_samples(x_plot[:, None]))
     c = sns.color_palette()[0]
-    ax.plot(x_plot, kde_sample_density, c=c, alpha=1, label="HMC")
+    ax.plot(x_plot, kde_sample_density, c=c, alpha=1, label="HMC Distribution")
     lines, labels = ax.get_legend_handles_labels()
     c = sns.color_palette()[2]
     if point_estimate:
         # # Plot lines
-        # ax.vlines(
-        #     point_estimate,
-        #     0,
-        #     np.max(kde_sample_density) * factor_height_point_estimate,
-        #     color="k",
-        #     linewidths=point_estimate_width,
-        #     label="MAP Point Estimate",
-        # )
-        # Plot points
-        line = ax.scatter(
+        line = ax.vlines(
             point_estimate,
-            np.exp(kde.score_samples(point_estimate.reshape(1, 1))),
-            s=100,
-            c=c,
-            label="MAP",
+            0,
+            np.max(kde_sample_density) * factor_height_point_estimate,
+            color=c,
+            # color="k",
+            # linewidths=point_estimate_width,
+            label="Point Estimate",
         )
+        ax.annotate(
+            "",
+            xy=(point_estimate, 0),
+            xycoords="data",
+            xytext=(
+                point_estimate,
+                np.max(kde_sample_density) * (factor_height_point_estimate + 0.018),
+            ),
+            textcoords="data",
+            arrowprops=dict(
+                arrowstyle="<-", connectionstyle="arc3", color=c, alpha=1
+            ),  #
+        )
+        # Plot points
+        # line = ax.scatter(
+        #     point_estimate,
+        #     np.exp(kde.score_samples(point_estimate.reshape(1, 1))),
+        #     s=100,
+        #     c=c,
+        #     label="MAP",
+        # )
         lines.append(line)
-        labels.append("MAP")
+        labels.append("Point estimates")
     if ensemble_point_estimates:
         # if ensemble_colour_indices is None:
         #     ensemble_colour_indices = np.arange(len(ensemble_point_estimates))
         # c = [sns.color_palette()[i] for i in ensemble_colour_indices]
         ensemble_point_estimates = np.array(ensemble_point_estimates)
         # # Plot Lines
-        # ax.vlines(
-        #     ensemble_point_estimates,
-        #     0,
-        #     np.max(kde_sample_density) * factor_height_point_estimate / len(ensemble_point_estimates),
-        #     color="k",
-        #     linewidths=point_estimate_width,
-        #     label="Ensemble Point Estimates",
-        # )
-        # Plot points
-        line = ax.scatter(
+        line = ax.vlines(
             ensemble_point_estimates,
-            np.exp(kde.score_samples(ensemble_point_estimates.reshape(-1, 1))),
-            s=100,
-            c=c,
-            alpha=1,
-            label="MAP Ensemble",
+            0,
+            np.max(kde_sample_density)
+            * factor_height_point_estimate,  # / len(ensemble_point_estimates),
+            color=c,
+            # linewidths=point_estimate_width,
+            label="Point Estimates",
         )
+        for point_estimate in ensemble_point_estimates:
+            ax.annotate(
+                "",
+                xy=(point_estimate, 0),
+                xycoords="data",
+                xytext=(
+                    point_estimate,
+                    np.max(kde_sample_density) * (factor_height_point_estimate + 0.018),
+                ),
+                textcoords="data",
+                arrowprops=dict(
+                    arrowstyle="<-", connectionstyle="arc3", color=c, alpha=1
+                ),  #
+            )
+        # Plot points
+        # line = ax.scatter(
+        #     ensemble_point_estimates,
+        #     np.exp(kde.score_samples(ensemble_point_estimates.reshape(-1, 1))),
+        #     s=100,
+        #     c=c,
+        #     alpha=1,
+        #     label="MAP Ensemble",
+        # )
         lines.append(line)
-        labels.append("MAP Ensemble")
+        labels.append("Point estimates")
     if distribution:
         # # 'normalized' to kde height
         # normalized_pdf = _normalize_distribution(x_plot, distribution, kde)
@@ -495,7 +539,7 @@ def plot_weight_space_histogram(
         # ax.plot(x_plot, distribution.prob(x_plot), c="k", label="Last Layer Weight Distribution")
         pdf = distribution.prob(x_plot)
         twin_ax = ax.twinx()
-        twin_ax.plot(x_plot, pdf, c=c, label="Last-Layer Distribution")
+        twin_ax.plot(x_plot, pdf, c=c, label="LLB Distribution")
         _lines, _labels = twin_ax.get_legend_handles_labels()
         lines += _lines
         labels += _labels
@@ -527,11 +571,15 @@ def plot_weight_space_histogram(
         # highest_kde = np.max(kde_sample_density)
         # mixture = mixture * highest_kde / highest_mixture
         twin_ax = ax.twinx()
-        twin_ax.plot(x_plot, mixture, c=c, alpha=1, label="Last-Layer Distribution")
+        twin_ax.plot(x_plot, mixture, c=c, alpha=1, label="LLB Distribution")
         _lines, _labels = twin_ax.get_legend_handles_labels()
         lines += _lines
         labels += _labels
         twin_ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        if no_ticks:
+            twin_ax.tick_params(
+                right=False, labelright=False
+            )
         # # Plot individual distributions
         # for normalized_pdf in normalized_pdfs:
         #     ax.plot(x_plot, normalized_pdf, c="k", alpha=0)
@@ -550,8 +598,12 @@ def plot_weight_space_histogram(
     # ax.xaxis.set_ticks(np.arange(start, end, 5))
     ax.xaxis.set_major_locator(plt.MaxNLocator(3))
     ax.yaxis.set_major_locator(plt.MaxNLocator(3))
-
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    if no_ticks:
+        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
     ax.legend(lines, labels)
+    #ax.legend()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
