@@ -645,7 +645,7 @@ def pickle_large_object(save_path, object):
     (see bug https://stackoverflow.com/questions/31468117/python-3-can-pickle-handle-byte-objects-larger-than-4gb). This function is a workaround to pickle larger objects.
     """
     max_bytes = 2 ** 31 - 1
-    bytes_out = pickle.dumps(object, protocol=4)
+    bytes_out = pickle.dumps(object)  # , protocol=4) # not sure if this is needed
     with open(save_path, "wb") as f_out:
         for idx in range(0, len(bytes_out), max_bytes):
             f_out.write(bytes_out[idx : idx + max_bytes])
