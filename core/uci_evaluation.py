@@ -657,7 +657,7 @@ def uci_benchmark_ensemble_sizes_save_plot(
     save=True,  # wether to save the results dict
     verbose=False,
 ):
-
+    tf.keras.backend.clear_session()
     results = {}
     fit_kwargs = {
         "epochs": epochs,
