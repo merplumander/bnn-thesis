@@ -45,15 +45,20 @@ datasets = [
 
 
 # %%
-gap_data = True
+gap_data = False
 n_networks = 50
+n_hidden_layers = 2
+hidden_layers_string = (
+    "two-hidden-layers" if n_hidden_layers == 2 else "one-hidden-layer"
+)
+
 
 if gap_data:
     data_dir = "uci_gap_data"
-    experiment_name = f"uci-gap_ensemble-size-convergence_one-hidden-layer"
+    experiment_name = f"uci-gap_ensemble-size-convergence_{hidden_layers_string}"
 else:
     data_dir = "uci_data"
-    experiment_name = f"uci_ensemble-size-convergence_one-hidden-layer"
+    experiment_name = f"uci_ensemble-size-convergence_{hidden_layers_string}"
 
 
 # %% markdown
