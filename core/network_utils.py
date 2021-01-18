@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Iterable
 
 import numpy as np
@@ -68,6 +69,46 @@ class AddSigmaLayer(tf.keras.layers.Layer):
     #     config.update({"sigma": self.sigma})
     #     #config.update({"units": self.units})
     #     return config
+
+
+def map_to_hmc_weights(weights):
+    """
+    Takes the output of MapDensityEnsemble .get_weights() and transforms it to weights
+    that are usable as multi-chain HMC starting points.
+    """
+    _weights = copy.deepcopy(weights)
+    for network_weights in _weights:
+        for i in np.arange(len(network_weights))[1::2]:
+            # i only indexes biases
+            network_weights[i] = tf.expand_dims(network_weights[i], axis=0)
+        network_weights[-1] = tf.expand_dims(network_weights[-1], axis=0)
+    hmc_weights = []
+    for i in range(len(_weights[0])):
+        hmc_weights.append(tf.stack((list(map(lambda x: x[i], _weights))), axis=0))
+    return hmc_weights
+
+
+def hmc_to_map_weights(weights):
+    """
+    Takes hmc samples, e.g. HMCDensityNetwork .sample_prior_state(n_samples=2) or
+    tf.nest.map_structure(lambda x: x[i], hmc_net.samples) and transforms it to a list
+    of weights usable by a MapDensityEnsemble.
+    """
+    _weights = copy.deepcopy(weights)
+    for i in np.arange(len(_weights))[1::2]:
+        _weights[i] = tf.squeeze(_weights[i], axis=1)
+    _weights[-1] = tf.squeeze(_weights[-1], axis=1)
+    n_networks = _weights[0].shape[0]
+    map_weights = []
+    for i_networks in range(n_networks):
+        map_weights.append(
+            [
+                _weights[i_weights][i_networks].numpy()
+                for i_weights in range(len(_weights))
+            ]
+        )
+
+    return map_weights
 
 
 def make_independent_gaussian_network_prior(
