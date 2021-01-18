@@ -162,9 +162,10 @@ class HMCDensityNetwork:
         transform_unconstrained_scale_factor=0.5,
         network_prior=None,
         noise_scale_prior=None,
-        sampler="hmc",
-        step_size_adapter="dual_averaging",
+        sampler="hmc",  # choices are "hmc" and "nuts"
+        step_size_adapter="dual_averaging",  # choices are "simple" and "dual_averaging"
         num_burnin_steps=1000,
+        discard_burnin_samples=False,  # mainly relevant for RAM limitations
         step_size=0.01,
         num_leapfrog_steps=100,  # only relevant for HMC
         max_tree_depth=10,  # only relevant for NUTS
@@ -202,6 +203,7 @@ class HMCDensityNetwork:
         self.sampler = sampler
         self._step_size_adapter = step_size_adapter
         self.num_burnin_steps = num_burnin_steps
+        self.discard_burnin_samples = discard_burnin_samples
         self.step_size = step_size
         self.num_leapfrog_steps = num_leapfrog_steps
         self.max_tree_depth = max_tree_depth
@@ -243,15 +245,23 @@ class HMCDensityNetwork:
 
     @property
     def samples(self):
-        _samples = tf.nest.map_structure(
-            lambda x: x[self.num_burnin_steps :], self._chain
-        )
+        if self.discard_burnin_samples:
+            _samples = self._chain
+        else:
+            _samples = tf.nest.map_structure(
+                lambda x: x[self.num_burnin_steps :], self._chain
+            )
         _samples = self._apply_chain_mask(_samples)
         return _samples
 
     @property
     def trace(self):
-        trace = tf.nest.map_structure(lambda x: x[self.num_burnin_steps :], self._trace)
+        if self.discard_burnin_samples:
+            trace = self._trace
+        else:
+            trace = tf.nest.map_structure(
+                lambda x: x[self.num_burnin_steps :], self._trace
+            )
         trace = self._apply_chain_mask(trace)
         return trace
 
@@ -314,7 +324,8 @@ class HMCDensityNetwork:
         return log_posterior
 
     def sample_prior_state(self, n_samples=(), overdisp=1.0, seed=0):
-        """Draw random samples for weights and biases of a NN according to some
+        """
+        Draw random samples for weights and biases of a NN according to some
         specified prior distributions. This set of parameter values can serve as a
         starting point for MCMC or gradient descent training.
         """
@@ -355,6 +366,8 @@ class HMCDensityNetwork:
         return chain, trace, final_kernel_results
 
     def fit(self, x_train, y_train, current_state=None, num_results=5000, resume=False):
+        if current_state is None and not resume:
+            raise ValueError("Must either pass current_state or set resume=True")
         target_log_prob_fn = self._target_log_prob_fn_factory(x_train, y_train)
         num_burnin_steps = 0 if resume else self.num_burnin_steps
 
@@ -394,9 +407,16 @@ class HMCDensityNetwork:
             adaptive_kernel=adaptive_kernel,
         )
         if not resume:
-            self._chain = chain
-            self._trace = trace
-
+            if self.discard_burnin_samples:
+                self._chain = tf.nest.map_structure(
+                    lambda x: x[self.num_burnin_steps :], chain
+                )
+                self._trace = tf.nest.map_structure(
+                    lambda x: x[self.num_burnin_steps :], trace
+                )
+            else:
+                self._chain = chain
+                self._trace = trace
         else:
             self._chain = tf.nest.map_structure(
                 lambda *parts: tf.concat(parts, axis=0), *[self._chain, chain]
@@ -623,6 +643,7 @@ class HMCDensityNetwork:
             # noise_scale_prior=self.noise_scale_prior,
             sampler=self.sampler,
             num_burnin_steps=self.num_burnin_steps,
+            discard_burnin_samples=self.discard_burnin_samples,
             step_size=self.step_size,
             num_leapfrog_steps=self.num_leapfrog_steps,
             max_tree_depth=self.max_tree_depth,
