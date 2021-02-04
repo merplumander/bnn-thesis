@@ -15,13 +15,26 @@ tfd = tfp.distributions
 def posterior_mean_field(kernel_size, bias_size=0, dtype=None):
     n = kernel_size + bias_size
     c = np.log(np.expm1(1e-5))
+
+    mean_init = 0.1 * np.random.randn(n).astype(tf.keras.backend.floatx())
+
     return tf.keras.Sequential(
         [
             tfp.layers.VariableLayer(2 * n, dtype=dtype),
+            # for initializations other than zero:
+            # tfp.layers.VariableLayer(
+            #     2 * n,
+            #     initializer=tfp.layers.BlockwiseInitializer(
+            #         ["zeros", "zeros", "zeros", "zeros"],
+            #         sizes=[kernel_size, bias_size, kernel_size, bias_size], # init for kernel means, bias means, kernel scale, bias scale
+            #     ),
+            #     dtype=dtype,
+            # ),
             tfp.layers.DistributionLambda(
                 lambda t: tfd.Independent(
                     tfd.Normal(
-                        loc=t[..., :n], scale=1e-5 + tf.nn.softplus(c + t[..., n:])
+                        loc=t[..., :n] + mean_init,
+                        scale=1e-5 + tf.nn.softplus(c + t[..., n:]),
                     ),
                     reinterpreted_batch_ndims=1,
                 )
@@ -71,6 +84,8 @@ def build_variational_keras_model(
     normalization_layer=False,
     prior_scale_identity_multiplier=1,
     kl_weight=None,
+    noise_scale_prior=None,
+    n_train=None,
     names=None,
     evaluate_ignore_prior_loss=True,
 ):
@@ -105,7 +120,7 @@ def build_variational_keras_model(
         else:
             x = layer(x)
     if initial_unconstrained_scale is not None:
-        x = AddSigmaLayer(initial_unconstrained_scale)(x)
+        x = AddSigmaLayer(initial_unconstrained_scale, name="sigma_layer")(x)
     x = tfp.layers.DistributionLambda(
         lambda t: tfd.Normal(
             loc=t[..., :1],
@@ -118,6 +133,19 @@ def build_variational_keras_model(
         model = ValidationModel(inputs=input, outputs=x)
     else:
         model = tf.keras.Model(inputs=input, outputs=x)
+    if initial_unconstrained_scale is not None:
+        if noise_scale_prior is not None:
+            model.add_loss(
+                lambda: -tf.reduce_sum(
+                    noise_scale_prior.log_prob(
+                        transform_unconstrained_scale(
+                            model.get_layer("sigma_layer").sigma,
+                            transform_unconstrained_scale_factor,
+                        )
+                    )
+                )
+                / n_train
+            )
     return model
 
 
@@ -131,6 +159,8 @@ class VariationalDensityNetwork:
         transform_unconstrained_scale_factor=0.05,  # factor to be used in the calculation of the actual noise std.
         kl_weight=None,  # should be 1 / n_train
         prior_scale_identity_multiplier=1,
+        noise_scale_prior=None,
+        n_train=None,
         preprocess_x=False,
         preprocess_y=False,
         learning_rate=0.1,
@@ -150,6 +180,8 @@ class VariationalDensityNetwork:
         self.transform_unconstrained_scale_factor = transform_unconstrained_scale_factor
         self.kl_weight = kl_weight
         self.prior_scale_identity_multiplier = prior_scale_identity_multiplier
+        self.noise_scale_prior = noise_scale_prior
+        self.n_train = n_train
         self.preprocess_x = preprocess_x
         self.preprocess_y = preprocess_y
         self.learning_rate = learning_rate
@@ -183,9 +215,11 @@ class VariationalDensityNetwork:
             self.layer_activations,
             initial_unconstrained_scale=self.initial_unconstrained_scale,
             transform_unconstrained_scale_factor=self.transform_unconstrained_scale_factor,
-            prior_scale_identity_multiplier=self.prior_scale_identity_multiplier,
             normalization_layer=self.preprocess_x,
             kl_weight=self.kl_weight,
+            prior_scale_identity_multiplier=self.prior_scale_identity_multiplier,
+            noise_scale_prior=noise_scale_prior,
+            n_train=n_train,
             names=self.names,
             evaluate_ignore_prior_loss=evaluate_ignore_prior_loss,
         )
@@ -282,8 +316,11 @@ class VariationalDensityNetwork:
         cat_probs = tf.ones((x.shape[0],) + (1, len(gaussians))) / len(gaussians)
         return tfd.Mixture(cat=tfd.Categorical(probs=cat_probs), components=gaussians)
 
-    def predict(self, x, n_predictions=10):
+    def predict(self, x, n_predictions=200):
         return self.predict_mixture_of_gaussians(x, n_predictions)
 
     def get_weights(self):
         return self.network.get_weights()
+
+    def set_weights(self, weights):
+        self.network.set_weights(weights)

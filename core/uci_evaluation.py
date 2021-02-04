@@ -191,7 +191,10 @@ def kfold_evaluate_uci(
         if model_class == VariationalDensityNetwork:
             model_kwargs["kl_weight"] = 1 / x_train.shape[0]
         n_train = x_train.shape[0]
-        if "weight_prior" in model_kwargs.keys():
+        if (
+            "weight_prior" in model_kwargs.keys()
+            or "noise_scale_prior" in model_kwargs.keys()
+        ):
             model_kwargs["n_train"] = n_train
         if weight_prior_scale is not None:
             l2_weight_lambda = prior_scale_to_regularization_lambda(

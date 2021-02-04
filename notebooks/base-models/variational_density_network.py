@@ -6,6 +6,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from core.plotting_utils import (
+    plot_distribution_samples,
     plot_ground_truth,
     plot_moment_matched_predictive_normal_distribution,
     plot_moment_matched_predictive_normal_distribution_and_function_samples,
@@ -25,7 +26,7 @@ tfd = tfp.distributions
 
 # %% codecell
 np.random.seed(0)
-n_train = 50
+n_train = 100
 batchsize_train = n_train
 
 x_train, y_train = create_split_periodic_data_heteroscedastic(
@@ -37,12 +38,16 @@ x_plot = create_x_plot(x_train)
 y_ground_truth = ground_truth_periodic_function(x_plot)
 
 
-layer_units = [50] + [1]
+layer_units = [50, 50] + [1]
 layer_activations = ["relu"] * (len(layer_units) - 1) + ["linear"]
 
+_var_d = tfd.InverseGamma(0.5, 0.01)
+noise_scale_prior = tfd.TransformedDistribution(
+    distribution=_var_d, bijector=tfp.bijectors.Invert(tfp.bijectors.Square())
+)
 
 # %% codecell
-y_lim = [-20, 20]
+y_lim = [-12, 12]
 fig, ax = plt.subplots(figsize=(8, 8))
 plot_training_data(x_train, y_train, fig=fig, ax=ax, y_lim=y_lim)
 plot_ground_truth(x_plot, y_ground_truth, fig=fig, ax=ax)
@@ -50,16 +55,18 @@ ax.legend()
 
 # %%
 early_stop_callback = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss", patience=30, verbose=1, restore_best_weights=True
+    monitor="loss", patience=20, verbose=1, restore_best_weights=False
 )
 variational_network = VariationalDensityNetwork(
     input_shape=[1],
     layer_units=layer_units,
     layer_activations=layer_activations,
-    initial_unconstrained_scale=-20,
-    transform_unconstrained_scale_factor=0.1,
+    initial_unconstrained_scale=-10,
+    transform_unconstrained_scale_factor=0.5,
     prior_scale_identity_multiplier=1,
-    kl_weight=1 / (1e1 * n_train),
+    kl_weight=1 / (1e0 * n_train),
+    noise_scale_prior=noise_scale_prior,
+    n_train=n_train,
     preprocess_x=True,
     preprocess_y=True,
     learning_rate=0.01,
@@ -68,27 +75,19 @@ variational_network = VariationalDensityNetwork(
 )
 
 variational_network.fit(
-    x_train,
-    y_train,
-    epochs=250,
-    verbose=1,
-    validation_data=(x_train, y_train),
-    early_stop_callback=early_stop_callback,
+    x_train, y_train, epochs=2000, verbose=0, early_stop_callback=early_stop_callback
 )
-
-# %% markdown
-# Notice that the average validation loss is generally much lower than the average
-# training loss. This is due to me having explicitly removed the prior kl_divergence
-# term from the validation evaluation, since I think for early stopping it is only
-# relevant to monitor the fit to the (validation) data, and not the prior loss
-# term. I don't think this is very controversial, if you expect your test data to come
-# from the same distribution as your training data. If you expect some sort of dataset
-# shift, you might think about including monitoring of this prior term for early
-# stopping.
 
 
 # %%
-variational_network.evaluate(x_train, y_train)
+# It's easy to get, change, and set the variational posterior's parameters to test their individual effect
+# weights = variational_network.get_weights()
+# weights
+# weights[3][:] = np.array([-1., 2., 10., 10.])
+# weights[3]
+# weights[4][:] = -10
+# variational_network.set_weights(weights)
+
 
 # %%
 predictive_distribution = variational_network.predict(x_plot, n_predictions=20)
@@ -107,4 +106,12 @@ plot_moment_matched_predictive_normal_distribution_and_function_samples(
 )
 
 # %%
-variational_network.get_weights()
+plot_distribution_samples(
+    x_plot=x_plot,
+    distribution_samples=gaussian_predictions,
+    x_train=x_train,
+    y_train=y_train,
+    y_ground_truth=y_ground_truth,
+    y_lim=y_lim,
+    no_ticks=False,
+)
