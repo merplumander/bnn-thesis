@@ -1,4 +1,5 @@
 # with inspiration from https://janosh.io/blog/hmc-bnn
+import os
 import pickle
 from collections import Iterable
 from pathlib import Path
@@ -329,13 +330,12 @@ class HMCDensityNetwork:
         specified prior distributions. This set of parameter values can serve as a
         starting point for MCMC or gradient descent training.
         """
-        tf.random.set_seed(seed)
         prior_state = []
         for w_prior in self.network_prior:
-            w_sample = w_prior.sample(n_samples) * overdisp
+            w_sample = w_prior.sample(n_samples, seed=seed) * overdisp
             prior_state.append(w_sample)
         if self.noise_scale_prior is not None:
-            noise_scale = self.noise_scale_prior.sample(n_samples)
+            noise_scale = self.noise_scale_prior.sample(n_samples, seed=seed)
             unconstrained_noise_scale = backtransform_constrained_scale(
                 noise_scale, factor=self.transform_unconstrained_scale_factor
             )
@@ -559,7 +559,6 @@ class HMCDensityNetwork:
         return predictive_mixture
 
     def predict_random_sample(self, x, seed=0):
-        tf.random.set_seed(seed)
         i_chain = tf.random.uniform(
             (), maxval=self.n_used_chains, dtype=tf.dtypes.int32, seed=seed
         )
@@ -662,14 +661,29 @@ class HMCDensityNetwork:
 
 def pickle_large_object(save_path, object):
     """
-    Due to an error of python on OS X objects larger than 4GB cannot be pickled directly
+    Due to an error of python on OS X objects larger than 4GB cannot be pickled and unpickled directly
     (see bug https://stackoverflow.com/questions/31468117/python-3-can-pickle-handle-byte-objects-larger-than-4gb). This function is a workaround to pickle larger objects.
     """
     max_bytes = 2 ** 31 - 1
-    bytes_out = pickle.dumps(object)  # , protocol=4) # not sure if this is needed
+    bytes_out = pickle.dumps(object, protocol=4)  # not sure if this is needed
     with open(save_path, "wb") as f_out:
         for idx in range(0, len(bytes_out), max_bytes):
             f_out.write(bytes_out[idx : idx + max_bytes])
+
+
+def unpickle_large_object(save_path):
+    """
+    Due to an error of python on OS X objects larger than 4GB cannot be pickled and unpickled directly
+    (see bug https://stackoverflow.com/questions/31468117/python-3-can-pickle-handle-byte-objects-larger-than-4gb). This function is a workaround to unpickle larger objects.
+    """
+    max_bytes = 2 ** 31 - 1
+    bytes_in = bytearray(0)
+    input_size = os.path.getsize(save_path)
+    with open(save_path, "rb") as f_in:
+        for _ in range(0, input_size, max_bytes):
+            bytes_in += f_in.read(max_bytes)
+    object = pickle.loads(bytes_in)
+    return object
 
 
 def hmc_density_network_from_save_path(
@@ -684,8 +698,9 @@ def hmc_density_network_from_save_path(
     prior. Don't worry about providing it if you only care about the saved network's
     prediction.
     """
-    with open(save_path, "rb") as f:
-        dic = pickle.load(f)
+    dic = unpickle_large_object(save_path)
+    # with open(save_path, "rb") as f:
+    #     dic = pickle.load(f)
     dic["init"]["network_prior"] = network_prior
     dic["init"]["noise_scale_prior"] = noise_scale_prior
     hmc_net = HMCDensityNetwork(**dic["init"])
