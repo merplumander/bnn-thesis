@@ -23,8 +23,11 @@ from core.map import (
     map_density_ensemble_from_save_path,
 )
 from core.network_utils import (
+    backtransform_constrained_scale,
     batch_repeat_matrix,
+    hmc_to_map_weights,
     make_independent_gaussian_network_prior,
+    map_to_hmc_weights,
     transform_unconstrained_scale,
 )
 from core.preprocessing import StandardPreprocessor
@@ -43,7 +46,7 @@ dataset = "yacht"
 data_seed = 0
 dataset_name = f"{dataset}_{data_seed + 1:02}"
 
-n_hidden_layers = 2
+n_hidden_layers = 1
 hidden_layers_string = (
     "two-hidden-layers" if n_hidden_layers == 2 else "one-hidden-layer"
 )
@@ -119,11 +122,12 @@ network_prior = make_independent_gaussian_network_prior(
 # # HMC
 
 # %%
-n_chains = 4
+n_chains = 2
 
-num_burnin_steps = 100  # 10000
-num_results = 100  # 100000
-num_steps_between_results = 4  # only every fifth sample is saved
+num_burnin_steps = 100000
+num_results = 1
+num_steps_between_results = 0  # 4 means only every fifth sample is saved
+discard_burnin_samples = True
 
 sampler = "hmc"
 num_leapfrog_steps = 100
@@ -145,19 +149,13 @@ hmc_net = HMCDensityNetwork(
     sampler=sampler,
     step_size_adapter="dual_averaging",
     num_burnin_steps=num_burnin_steps,
+    discard_burnin_samples=discard_burnin_samples,
     step_size=step_size,
     num_leapfrog_steps=num_leapfrog_steps,
     max_tree_depth=10,
     num_steps_between_results=num_steps_between_results,
     seed=train_seed,
 )
-prior_samples = [hmc_net.sample_prior_state(seed=seed) for seed in [0, 1, 2, 3, 4]]
-prior_predictions = [
-    hmc_net.predict_from_sample_parameters(x_train, prior_sample)
-    for prior_sample in prior_samples
-]
-[-prediction.log_prob(y_train) / n_train for prediction in prior_predictions]
-
 
 overdispersed_prior_samples = hmc_net.sample_prior_state(
     n_samples=n_chains,
@@ -167,7 +165,80 @@ overdispersed_prior_samples = hmc_net.sample_prior_state(
         dataset
     ),  # make sure each dataset( and possibly data split) starts from different prior samples
 )
+
+prior_predictions = [
+    hmc_net.predict_from_sample_parameters(
+        x_train, tf.nest.map_structure(lambda x: x[i], overdispersed_prior_samples)
+    )
+    for i in range(n_chains)
+]
+[-prediction.log_prob(y_train) / n_train for prediction in prior_predictions]
+
 current_state = overdispersed_prior_samples
+
+
+# %% markdown
+# ## Do a few gradient descent training epochs to help HMC find a region of higher posterior density
+
+# %%
+ensemble = MapDensityEnsemble(
+    n_networks=n_chains,
+    input_shape=input_shape,
+    layer_units=layer_units,
+    layer_activations=layer_activations,
+    initial_unconstrained_scale=-1,  # doesn't matter, will be overwritten
+    transform_unconstrained_scale_factor=transform_unconstrained_scale_factor,
+    weight_prior=weight_prior,
+    bias_prior=bias_prior,
+    noise_scale_prior=noise_scale_prior,
+    n_train=n_train,
+    learning_rate=0.5,
+)
+
+assert check_posterior_equivalence(
+    ensemble.networks[0], hmc_net, x_train, y_train, n_train=n_train
+)
+
+map_weights = hmc_to_map_weights(overdispersed_prior_samples)
+# for weight in map_weights:
+#     weight[-1] = backtransform_constrained_scale(0.014, transform_unconstrained_scale_factor).numpy()
+ensemble.set_weights(map_weights)
+[network.noise_sigma for network in ensemble.networks]
+initial_unconstrained_scales = [map_weights[i][-1] for i in range(len(map_weights))]
+predictions = [network.predict(x_train) for network in ensemble.networks]
+print(
+    "Initial samples' mean train negative log likelihood",
+    [
+        -tf.reduce_mean(prediction.log_prob(y_train)).numpy()
+        for prediction in predictions
+    ],
+)
+
+ensemble.fit(
+    x_train=x_train, y_train=y_train, batch_size=batch_size, epochs=10, verbose=0
+)
+
+predictions = [network.predict(x_train) for network in ensemble.networks]
+print(
+    "After gradients descent training mean train negative log likelihood",
+    [
+        -tf.reduce_mean(prediction.log_prob(y_train)).numpy()
+        for prediction in predictions
+    ],
+)
+[network.noise_sigma for network in ensemble.networks]
+map_weights = ensemble.get_weights()
+# for weight, scale in zip(map_weights, initial_unconstrained_scales):
+#     weight[-1] = scale # backtransform_constrained_scale(0.014, transform_unconstrained_scale_factor).numpy() #backtransform_constrained_scale(np.array([0.1]), transform_unconstrained_scale_factor).numpy().astype(np.float32)
+# ensemble.set_weights(map_weights)
+# predictions = [network.predict(x_train) for network in ensemble.networks]
+# print(
+#     "After gradients descent training mean train negative log likelihood",
+#     [-tf.reduce_mean(prediction.log_prob(y_train)).numpy() for prediction in predictions],
+# )
+print([network.noise_sigma for network in ensemble.networks])
+current_state = map_to_hmc_weights(map_weights)
+
 
 # %% markdown
 # # Fitting
@@ -183,7 +254,7 @@ hmc_net.fit(x_train, y_train, current_state=current_state, num_results=num_resul
 
 # %%
 ################################################################################
-# save_path = save_dir.joinpath(f"hmc-{dataset_name}")
+save_path = save_dir.joinpath(f"hmc-{dataset_name}")
 # hmc_net.save(save_path)
 ################################################################################
 
@@ -193,10 +264,10 @@ hmc_net.fit(x_train, y_train, current_state=current_state, num_results=num_resul
 
 # %%
 ################################################################################
-# save_path = save_dir.joinpath(f"hmc-{dataset_name}")
-# hmc_net = hmc_density_network_from_save_path(
-#     save_path, network_prior=network_prior, noise_scale_prior=noise_scale_prior
-# )
+save_path = save_dir.joinpath(f"hmc-{dataset_name}")
+hmc_net = hmc_density_network_from_save_path(
+    save_path, network_prior=network_prior, noise_scale_prior=noise_scale_prior
+)
 ################################################################################
 
 
@@ -205,11 +276,11 @@ hmc_net.fit(x_train, y_train, current_state=current_state, num_results=num_resul
 
 # %%
 ################################################################################
-hmc_net.fit(x_train, y_train, num_results=20000, resume=True)
+# hmc_net.num_steps_between_results = 9
+hmc_net.fit(x_train, y_train, num_results=50000, resume=True)
 ################################################################################
 
 # %%
-
 
 # %%
 undo_masking(hmc_net)
@@ -220,10 +291,10 @@ mask_nonsense_chains(
     highest_acceptance_ratio=0.9,
     x_train=x_train,
     y_train=y_train,
-    thinning=100,
+    thinning=200,
 )
 hmc_net.samples[0].shape[:2]
-
+hmc_net._chain[0].shape
 
 # %%
 acceptance_ratio = hmc_net.acceptance_ratio()
@@ -234,17 +305,18 @@ hmc_net.leapfrog_steps_taken()
 
 
 # %%
-print("Potential Scale Reduction")
+print("Potential Scale Reduction\n")
 
-# weights_reduction = hmc_net.potential_scale_reduction()
-# print(
-#     f"Weight Space (Max per layer): {tf.nest.map_structure(lambda x: tf.reduce_max(x).numpy(), weights_reduction)}"
-# )
+weights_reduction = hmc_net.potential_scale_reduction()
+print(
+    f"Weight Space (Max per layer): {tf.nest.map_structure(lambda x: tf.reduce_max(x).numpy(), weights_reduction)}\n"
+)
 
 
 predictive_mean_reduction = tfp.mcmc.potential_scale_reduction(
     hmc_net._base_predict(x_train, thinning=100).mean(), split_chains=False
 )
+# sorted(predictive_mean_reduction)
 print(
     f"Mean of Predictive means (train set): {tf.reduce_mean(predictive_mean_reduction):.3f}"
 )
@@ -264,6 +336,118 @@ print(
 print(
     f"Predictive stddev:{tfp.mcmc.potential_scale_reduction(hmc_net._base_predict(x_train[0:1, :], thinning=100).stddev())[0,0]:.3f}"
 )
+
+
+# %% markdown
+# ## Predictive distribution Wasserstein distance per chain
+
+# %%
+chain_predictions = [
+    hmc_net.predict_individual_chain(x_train, i_chain=i_chain, thinning=100)
+    for i_chain in range(hmc_net.n_used_chains)
+]
+
+for i in range(len(chain_predictions)):
+    for j in range(len(chain_predictions))[i + 1 :]:
+        print(
+            predictive_distribution_wasserstein_distance(
+                chain_predictions[i], chain_predictions[j], n_samples=10000, seed=0
+            )
+        )
+
+
+# %%
+chain_predictions = [
+    hmc_net.predict_individual_chain(x_test, i_chain=i_chain, thinning=10)
+    for i_chain in range(hmc_net.n_used_chains)
+]
+for i in range(len(chain_predictions)):
+    for j in range(len(chain_predictions))[i + 1 :]:
+        print(
+            predictive_distribution_wasserstein_distance(
+                chain_predictions[i], chain_predictions[j], n_samples=10000, seed=0
+            )
+        )
+
+
+# %%
+ess = hmc_net.effective_sample_size(thinning=100)
+tf.nest.map_structure(
+    lambda x: (
+        int(tf.reduce_mean(x).numpy()),
+        int(tf.math.reduce_std(x).numpy()),
+        int(tf.reduce_min(x).numpy()),
+        int(tf.reduce_max(x).numpy()),
+    ),
+    ess,
+)
+
+
+# %%
+chain_predictions = [
+    hmc_net.predict_individual_chain(x_test, i_chain=i_chain, thinning=20)
+    for i_chain in range(hmc_net.n_used_chains)
+]
+[-prediction.log_prob(y_test) / n_test for prediction in chain_predictions]
+
+[
+    tf.math.sqrt(tf.reduce_mean((prediction.mean() - y_test) ** 2))
+    for prediction in chain_predictions
+]
+
+
+# %%
+prediction = hmc_net.predict(x_test, thinning=5)
+print(f"negative test LL: {-prediction.log_prob(y_test) / n_test}")
+print(f"RMSE: {rmse(prediction.mean(), y_test)}")
+
+
+# %%
+# Effective sample size of predictive distribution parameters
+_prediction = hmc_net._base_predict(x_train, thinning=50)
+predictive_samples = [_prediction.mean(), _prediction.stddev()[:, :, 0:1]]
+cross_chain_dims = None if hmc_net.n_used_chains == 1 else [1, 1]
+ess = tfp.mcmc.effective_sample_size(
+    predictive_samples, cross_chain_dims=cross_chain_dims
+)
+print(
+    int(tf.reduce_mean(ess[0]).numpy()),
+    int(tf.math.reduce_std(ess[0]).numpy()),
+    int(tf.reduce_min(ess[0]).numpy()),
+    int(tf.reduce_max(ess[0]).numpy()),
+)
+print(int(ess[1][0, 0].numpy()))
+
+_prediction = hmc_net._base_predict(x_test, thinning=50)
+predictive_samples = [_prediction.mean(), _prediction.stddev()[:, :, 0:1]]
+cross_chain_dims = None if hmc_net.n_used_chains == 1 else [1, 1]
+ess = tfp.mcmc.effective_sample_size(
+    predictive_samples, cross_chain_dims=cross_chain_dims
+)
+print(
+    int(tf.reduce_mean(ess[0]).numpy()),
+    int(tf.math.reduce_std(ess[0]).numpy()),
+    int(tf.reduce_min(ess[0]).numpy()),
+    int(tf.reduce_max(ess[0]).numpy()),
+)
+
+
+# %%
+fig, ax = plt.subplots(figsize=(8, 8))
+for i_chain in range(hmc_net.n_used_chains):
+    scales = transform_unconstrained_scale(
+        hmc_net._chain[-1][num_burnin_steps:, i_chain],
+        factor=transform_unconstrained_scale_factor,
+    )
+    _x = np.linspace(0, 0.3, 1000)
+    ax.hist(scales.numpy().flatten(), bins=500, density=False, alpha=0.2)
+# ax.plot(_x, noise_scale_prior.prob(_x).numpy().flatten())
+
+# %%
+fig, ax = plt.subplots(figsize=(8, 8))
+for i_chain in range(hmc_net.n_used_chains):
+    weight = hmc_net.samples[2][:, i_chain, 1, 0]
+    ax.hist(weight.numpy().flatten(), bins=40, density=True, alpha=0.2)
 
 
 # %% markdown

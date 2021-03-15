@@ -12,6 +12,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import yaml
 from sklearn.model_selection import RepeatedKFold, train_test_split
+from sklearn.utils import shuffle
 
 from core.last_layer import PostHocLastLayerBayesianEnsemble as LLBEnsemble
 from core.last_layer import PostHocLastLayerBayesianNetwork as LLBNetwork
@@ -186,6 +187,7 @@ def kfold_evaluate_uci(
         y_validation = y[validation].reshape(-1, 1)
         y_test = y[test].reshape(-1, 1)
         validation_data = (x_validation, y_validation)
+        x_train, y_train = shuffle(x_train, y_train, random_state=train_seed + i)
         if validation.size == 0:
             validation_data = None
         if model_class == VariationalDensityNetwork:

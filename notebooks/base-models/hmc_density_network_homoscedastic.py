@@ -171,7 +171,7 @@ plot_distribution_samples(
 # hmc network. This checks that the prior and likelihood are equivalent.
 
 # %%
-assert check_posterior_equivalence(net, hmc_net, x_train, y_train)
+assert check_posterior_equivalence(net, hmc_net, x_train, y_train, n_train=n_train)
 
 
 # %%

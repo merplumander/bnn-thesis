@@ -9,6 +9,7 @@ ignore =
   E731,
   E302, # expected 2 blank lines, found 1
   C901, # function is too complex
+  E722, # do not use bare except
 max-line-length = 88
 max-complexity = 18
 select = B,C,E,F,W,T4,B9

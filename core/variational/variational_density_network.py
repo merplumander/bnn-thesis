@@ -12,35 +12,40 @@ from ..preprocessing import StandardizePreprocessor
 tfd = tfp.distributions
 
 
-def posterior_mean_field(kernel_size, bias_size=0, dtype=None):
-    n = kernel_size + bias_size
-    c = np.log(np.expm1(1e-5))
+def posterior_mean_field_generator(mean_init_noise_scale=0.1):
+    def posterior_mean_field(kernel_size, bias_size=0, dtype=None):
+        n = kernel_size + bias_size
+        c = np.log(np.expm1(1e-5))
 
-    mean_init = 0.1 * np.random.randn(n).astype(tf.keras.backend.floatx())
+        mean_init = mean_init_noise_scale * np.random.randn(n).astype(
+            tf.keras.backend.floatx()
+        )
 
-    return tf.keras.Sequential(
-        [
-            tfp.layers.VariableLayer(2 * n, dtype=dtype),
-            # for initializations other than zero:
-            # tfp.layers.VariableLayer(
-            #     2 * n,
-            #     initializer=tfp.layers.BlockwiseInitializer(
-            #         ["zeros", "zeros", "zeros", "zeros"],
-            #         sizes=[kernel_size, bias_size, kernel_size, bias_size], # init for kernel means, bias means, kernel scale, bias scale
-            #     ),
-            #     dtype=dtype,
-            # ),
-            tfp.layers.DistributionLambda(
-                lambda t: tfd.Independent(
-                    tfd.Normal(
-                        loc=t[..., :n] + mean_init,
-                        scale=1e-5 + tf.nn.softplus(c + t[..., n:]),
-                    ),
-                    reinterpreted_batch_ndims=1,
-                )
-            ),
-        ]
-    )
+        return tf.keras.Sequential(
+            [
+                tfp.layers.VariableLayer(2 * n, dtype=dtype),
+                # for initializations other than zero:
+                # tfp.layers.VariableLayer(
+                #     2 * n,
+                #     initializer=tfp.layers.BlockwiseInitializer(
+                #         ["zeros", "zeros", "zeros", "zeros"],
+                #         sizes=[kernel_size, bias_size, kernel_size, bias_size], # init for kernel means, bias means, kernel scale, bias scale
+                #     ),
+                #     dtype=dtype,
+                # ),
+                tfp.layers.DistributionLambda(
+                    lambda t: tfd.Independent(
+                        tfd.Normal(
+                            loc=t[..., :n] + mean_init,
+                            scale=1e-5 + tf.nn.softplus(c + t[..., n:]),
+                        ),
+                        reinterpreted_batch_ndims=1,
+                    )
+                ),
+            ]
+        )
+
+    return posterior_mean_field
 
 
 def prior_fn_factory(scale_identity_multiplier=1):
@@ -86,6 +91,7 @@ def build_variational_keras_model(
     kl_weight=None,
     noise_scale_prior=None,
     n_train=None,
+    mean_init_noise_scale=0.0,
     names=None,
     evaluate_ignore_prior_loss=True,
 ):
@@ -102,7 +108,7 @@ def build_variational_keras_model(
         x = NormalizationFix(input_shape=input_shape, name="normalization")(input)
 
     prior = prior_fn_factory(prior_scale_identity_multiplier)
-
+    posterior_mean_field = posterior_mean_field_generator(mean_init_noise_scale)
     for i, units, activation, name in zip(
         range(len(layer_units)), layer_units, layer_activations, names
     ):
@@ -166,6 +172,7 @@ class VariationalDensityNetwork:
         learning_rate=0.1,
         names=None,
         evaluate_ignore_prior_loss=True,
+        mean_init_noise_scale=0.1,
         seed=0,
     ):
         if initial_unconstrained_scale is not None:
@@ -193,22 +200,6 @@ class VariationalDensityNetwork:
         if self.preprocess_y:
             self.y_preprocessor = StandardizePreprocessor()
 
-        #         self.network = tf.keras.Sequential()
-        #         self.network.add(tf.keras.layers.InputLayer(input_shape=[1]))
-
-        #         for units, activation in zip(self.layer_units, self.layer_activations):
-        #             self.network.add(
-        #                 tfp.layers.DenseVariational(
-        #                     input_shape=[1],
-        #                     units=units,
-        #                     make_posterior_fn=posterior_mean_field,
-        #                     make_prior_fn=prior,
-        #                     use_bias=True,
-        #                     kl_weight=1 / x_train.shape[0],
-        #                     activation=activation,
-        #                 )
-        #             )
-
         self.network = build_variational_keras_model(
             self.input_shape,
             self.layer_units,
@@ -220,23 +211,10 @@ class VariationalDensityNetwork:
             prior_scale_identity_multiplier=self.prior_scale_identity_multiplier,
             noise_scale_prior=noise_scale_prior,
             n_train=n_train,
+            mean_init_noise_scale=mean_init_noise_scale,
             names=self.names,
             evaluate_ignore_prior_loss=evaluate_ignore_prior_loss,
         )
-
-        # if self.initial_unconstrained_scale is not None:
-        #     self.network.add(AddSigmaLayer(self.initial_unconstrained_scale))
-
-        # self.network.add(
-        #     tfp.layers.DistributionLambda(
-        #         lambda t: tfd.Normal(
-        #             loc=t[..., :1],
-        #             scale=transform_unconstrained_scale(
-        #                 t[..., 1:], transform_unconstrained_scale_factor
-        #             ),
-        #         )
-        #     )
-        # )
 
         self.network.compile(
             optimizer=tf.optimizers.Adam(learning_rate=self.learning_rate),

@@ -128,11 +128,12 @@ network_prior = make_independent_gaussian_network_prior(
 # # HMC
 
 # %%
-n_chains = 4
+n_chains = 2
 
-num_burnin_steps = 100  # 10000
-num_results = 100  # 100000
-num_steps_between_results = 4  # only every fifth sample is saved
+num_burnin_steps = 50  # 00  # 10000
+num_results = 50  # 000  # 100000
+num_steps_between_results = 0  # only every fifth sample is saved
+discard_burnin_samples = True
 
 sampler = "hmc"
 num_leapfrog_steps = 100
@@ -154,6 +155,7 @@ hmc_net = HMCDensityNetwork(
     sampler=sampler,
     step_size_adapter="dual_averaging",
     num_burnin_steps=num_burnin_steps,
+    discard_burnin_samples=discard_burnin_samples,
     step_size=step_size,
     num_leapfrog_steps=num_leapfrog_steps,
     max_tree_depth=10,
@@ -192,8 +194,8 @@ hmc_net.fit(x_train, y_train, current_state=current_state, num_results=num_resul
 
 # %%
 ################################################################################
-save_path = save_dir.joinpath(f"ste_hmc-{dataset_name}")
-hmc_net.save(save_path)
+# save_path = save_dir.joinpath(f"__hmc-{dataset_name}")
+# hmc_net.save(save_path)
 ################################################################################
 
 
@@ -202,7 +204,7 @@ hmc_net.save(save_path)
 
 # %%
 ################################################################################
-# save_path = save_dir.joinpath(f"_hmc-{dataset_name}")
+# save_path = save_dir.joinpath(f"2-chain_hmc-{dataset_name}")
 # hmc_net = hmc_density_network_from_save_path(
 #     save_path, network_prior=network_prior, noise_scale_prior=noise_scale_prior
 # )
@@ -238,7 +240,7 @@ print(
 
 
 predictive_mean_reduction = tfp.mcmc.potential_scale_reduction(
-    hmc_net._base_predict(x_train, thinning=20).mean(), split_chains=False
+    hmc_net._base_predict(x_train, thinning=10).mean(), split_chains=False
 )
 print(
     f"Mean of Predictive means (train set): {tf.reduce_mean(predictive_mean_reduction):.3f}"
@@ -248,7 +250,7 @@ print(
 )
 
 predictive_mean_reduction = tfp.mcmc.potential_scale_reduction(
-    hmc_net._base_predict(x_test, thinning=20).mean(), split_chains=False
+    hmc_net._base_predict(x_test, thinning=10).mean(), split_chains=False
 )
 print(
     f"Mean of Predictive means (test set): {tf.reduce_mean(predictive_mean_reduction):.3f}"

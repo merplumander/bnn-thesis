@@ -1,9 +1,9 @@
-
-VI: 0
-Map: 1
-Last Layer Bayesian: 2
-Ensemble: 3
-LLB Ensemble: 4
-Ensemble MM: 5
+Ensemble: 0
+LLB Ensemble: 1
+HMC: 8
+MAP: 0
+LLB: 1
+VI: 2
+Ensemble MM: 8
 LLB Ensemble MM: 6
 VI-Flat-Prior: 7

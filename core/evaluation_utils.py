@@ -26,7 +26,9 @@ def backtransform_normalized_ll(normalized_ll, y_normalization_scale):
 
 
 def get_y_normalization_scales(dataset, gap_data=False):
-    _x, _y, train_indices, _, test_indices = load_uci_data(f"{dataset}", gap_data=gap_data)
+    _x, _y, train_indices, _, test_indices = load_uci_data(
+        f"{dataset}", gap_data=gap_data
+    )
     y_normalization_scales = []
     for i_split in range(len(train_indices)):
         _y_train = _y[train_indices[i_split]].reshape(-1, 1)
@@ -65,6 +67,6 @@ def predictive_distribution_wasserstein_distance(
         samples2 = predictive_samples2[:, i_test_point]
         # ot's  Wasserstein distance is about 30% faster than scipy's
         # wd = wasserstein_distance(samples1, samples2)
-        wd = ot.wasserstein_1d(samples1, samples2, p=1)
+        wd = ot.wasserstein_1d(samples1, samples2)
         wds.append(wd)
     return np.mean(wds)

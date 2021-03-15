@@ -1,5 +1,6 @@
 # %load_ext autoreload
 # %autoreload 2
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -14,6 +15,10 @@ from core.map import MapDensityEnsemble, MapDensityNetwork
 from core.network_utils import make_independent_gaussian_network_prior
 from core.plotting_utils import plot_uci_ensemble_size_benchmark
 from core.uci_evaluation import uci_benchmark_ensemble_sizes_save_plot
+
+# insert at 1, 0 is the script path (or '' in REPL)
+sys.path.insert(1, ".")
+
 
 tfd = tfp.distributions
 
@@ -56,7 +61,9 @@ early_stop_callback = tf.keras.callbacks.EarlyStopping(
     monitor="loss", patience=patience, verbose=0, restore_best_weights=False
 )
 
-experiment_name = f"uci_ensemble-size-convergence_{hidden_layers_string}"
+experiment_name = (
+    f"uci_ensemble-size-convergence_{hidden_layers_string}_shuffle-train-data"
+)
 kwargs = dict(
     train_seed=experiment_config["train_seed"],
     layer_units=layer_units,

@@ -57,7 +57,7 @@ _var_d = tfd.InverseGamma(a, b)
 noise_scale_prior = tfd.TransformedDistribution(
     distribution=_var_d, bijector=tfp.bijectors.Invert(tfp.bijectors.Square())
 )
-initial_unconstrained_scale = -7  # experiment_config["initial_unconstrained_scale"],
+initial_unconstrained_scale = -1  # experiment_config["initial_unconstrained_scale"],
 
 
 patience = experiment_config["convergence_patience"]
@@ -87,7 +87,7 @@ fit_kwargs = dict(
 )
 
 
-use_gap_data = False
+use_gap_data = True
 
 
 # %%
@@ -108,7 +108,7 @@ for dataset in datasets:
     results = kfold_evaluate_uci(
         VariationalDensityNetwork,
         dataset=dataset,
-        use_gap_data=False,
+        use_gap_data=use_gap_data,
         train_seed=experiment_config["train_seed"],
         model_kwargs=model_kwargs,
         fit_kwargs=fit_kwargs,

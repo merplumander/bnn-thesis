@@ -1,8 +1,11 @@
+from pathlib import Path
+
 import awkward1 as ak
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import tensorflow as tf
+import tikzplotlib as tpl
 from sklearn.neighbors import KernelDensity
 
 
@@ -357,20 +360,23 @@ def plot_weight_space_first_vs_last_layer(
     distribution_first=None,
     distribution_last=None,
     ensemble_distributions_last=None,
+    vi=False,
     x1_label=None,
     y1_label=None,
     x2_label=None,
     y2_label=None,
     no_ticks=True,
     fig_title="",
+    figsize=(10, 5),
     y_lim1=None,
     y_lim2=None,
     save_path=None,
 ):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
     fig.subplots_adjust(hspace=0, wspace=0.05)
-    fig.suptitle(fig_title, fontsize=15)
-    ax1.set_title("Input to hidden layer weight")
+    fig.suptitle(fig_title, fontsize=14)
+    ax1.set_title("Input to hidden layer weight", fontsize=12)
+    dist_label = "N-dist." if vi else None
     plot_weight_space_histogram(
         samples_first,
         x_plot=x_plot_first,
@@ -381,13 +387,14 @@ def plot_weight_space_first_vs_last_layer(
         point_estimate=point_estimate_first,
         ensemble_point_estimates=ensemble_point_estimates_first,
         distribution=distribution_first,
+        dist_label=dist_label,
         x_label=x1_label,
         y_label=y1_label,
         fig=fig,
         ax=ax1,
     )
     ax1.set_ylim(y_lim1)
-    ax2.set_title("Hidden to output layer weight")
+    ax2.set_title("Hidden to output layer weight", fontsize=12)
     plot_weight_space_histogram(
         samples_last,
         x_plot=x_plot_last,
@@ -399,6 +406,7 @@ def plot_weight_space_first_vs_last_layer(
         ensemble_point_estimates=ensemble_point_estimates_last,
         distribution=distribution_last,
         ensemble_distributions=ensemble_distributions_last,
+        dist_label=dist_label,
         x_label=x2_label,
         y_label=y2_label,
         fig=fig,
@@ -407,7 +415,20 @@ def plot_weight_space_first_vs_last_layer(
     ax2.set_ylim(y_lim2)
     plt.tight_layout()
     if save_path:
-        fig.savefig(save_path, bbox_inches="tight")
+        Path(save_path)
+        fig.savefig(save_path.with_suffix(".pdf"), bbox_inches="tight")
+        print(save_path.with_suffix(".tex"))
+        tpl.save(
+            save_path.with_suffix(
+                ".tex"
+            ),  # this is name of the file where your code will lie
+            axis_width="\\figwidth",  # we want LaTeX to take care of the width
+            axis_height="\\figheight",  # we want LaTeX to take care of the height
+            # if the figure contains an image in the background (this one doesn't), this is where LaTeX (!) should search for the png.
+            tex_relative_path_to_data="./",
+            # we want the plot to look *exactly* like here (e.g. axis limits, axis ticks, etc.)
+            strict=True,
+        )
 
 
 def plot_weight_space_histogram(
@@ -422,6 +443,7 @@ def plot_weight_space_histogram(
     distribution=None,
     ensemble_colour_indices=None,
     ensemble_distributions=None,
+    dist_label=None,
     x_label=None,
     y_label=None,
     no_ticks=True,
@@ -429,7 +451,7 @@ def plot_weight_space_histogram(
     ax=None,
     save_path=None,
 ):
-    point_estimate_width = 1.0
+    # point_estimate_width = 1.0
     factor_height_point_estimate = 1.1
 
     if fig is None and ax is None:
@@ -447,7 +469,7 @@ def plot_weight_space_histogram(
         x_plot = np.linspace(x_min - 0.1 * d, x_max + 0.1 * d, 1000)
     kde_sample_density = np.exp(kde.score_samples(x_plot[:, None]))
     c = sns.color_palette()[0]
-    ax.plot(x_plot, kde_sample_density, c=c, alpha=1, label="HMC Distribution")
+    ax.plot(x_plot, kde_sample_density, c=c, alpha=1, label="HMC")
     lines, labels = ax.get_legend_handles_labels()
     c = sns.color_palette()[2]
     if point_estimate:
@@ -459,7 +481,7 @@ def plot_weight_space_histogram(
             color=c,
             # color="k",
             # linewidths=point_estimate_width,
-            label="Point Estimate",
+            label="MAP",
         )
         ax.annotate(
             "",
@@ -483,7 +505,7 @@ def plot_weight_space_histogram(
         #     label="MAP",
         # )
         lines.append(line)
-        labels.append("Point estimates")
+        labels.append("Dirac")
     if ensemble_point_estimates:
         # if ensemble_colour_indices is None:
         #     ensemble_colour_indices = np.arange(len(ensemble_point_estimates))
@@ -497,7 +519,7 @@ def plot_weight_space_histogram(
             * factor_height_point_estimate,  # / len(ensemble_point_estimates),
             color=c,
             # linewidths=point_estimate_width,
-            label="Point Estimates",
+            label="Mix. Diracs",
         )
         for point_estimate in ensemble_point_estimates:
             ax.annotate(
@@ -523,8 +545,10 @@ def plot_weight_space_histogram(
         #     label="MAP Ensemble",
         # )
         lines.append(line)
-        labels.append("Point estimates")
+        labels.append("Mix. Diracs")
     if distribution:
+        if dist_label is None:
+            dist_label = "t-dist."
         # # 'normalized' to kde height
         # normalized_pdf = _normalize_distribution(x_plot, distribution, kde)
 
@@ -539,11 +563,13 @@ def plot_weight_space_histogram(
         # ax.plot(x_plot, distribution.prob(x_plot), c="k", label="Last Layer Weight Distribution")
         pdf = distribution.prob(x_plot)
         twin_ax = ax.twinx()
-        twin_ax.plot(x_plot, pdf, c=c, label="LLB Distribution")
+        twin_ax.plot(x_plot, pdf, c=c, label=dist_label)
         _lines, _labels = twin_ax.get_legend_handles_labels()
         lines += _lines
         labels += _labels
         twin_ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        if no_ticks:
+            twin_ax.tick_params(right=False, labelright=False)
     if ensemble_distributions:
         normalized_pdfs = []
         means = []
@@ -571,15 +597,13 @@ def plot_weight_space_histogram(
         # highest_kde = np.max(kde_sample_density)
         # mixture = mixture * highest_kde / highest_mixture
         twin_ax = ax.twinx()
-        twin_ax.plot(x_plot, mixture, c=c, alpha=1, label="LLB Distribution")
+        twin_ax.plot(x_plot, mixture, c=c, alpha=1, label="Mix. t-dists.")
         _lines, _labels = twin_ax.get_legend_handles_labels()
         lines += _lines
         labels += _labels
         twin_ax.yaxis.set_major_locator(plt.MaxNLocator(3))
         if no_ticks:
-            twin_ax.tick_params(
-                right=False, labelright=False
-            )
+            twin_ax.tick_params(right=False, labelright=False)
         # # Plot individual distributions
         # for normalized_pdf in normalized_pdfs:
         #     ax.plot(x_plot, normalized_pdf, c="k", alpha=0)
@@ -598,12 +622,12 @@ def plot_weight_space_histogram(
     # ax.xaxis.set_ticks(np.arange(start, end, 5))
     ax.xaxis.set_major_locator(plt.MaxNLocator(3))
     ax.yaxis.set_major_locator(plt.MaxNLocator(3))
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
+    ax.set_xlabel(x_label, fontsize=12)
+    ax.set_ylabel(y_label, fontsize=12)
     if no_ticks:
         ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
     ax.legend(lines, labels)
-    #ax.legend()
+    # ax.legend()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
     return fig, ax
@@ -650,15 +674,18 @@ def plot_uci_ensemble_size_benchmark(
     x=None,
     x_add_jitter=0.0,
     normalization=False,
+    optimum_is_full_ensemble=False,
     errorbars=True,
-    pareto_point=False,
     labels=None,
     title=None,
     x_label=None,
     y_label=None,
     x_lim=None,
     colors=None,
+    linewidth=None,
+    linestyle=None,
     alpha=1.0,
+    legend=True,
     fig=None,
     ax=None,
     save_path=None,
@@ -678,8 +705,12 @@ def plot_uci_ensemble_size_benchmark(
         size_means = np.mean(results, axis=1)
         size_stds = np.std(results, axis=1)
         if normalization:
-            min = np.min(size_means)
-            max = np.max(size_means)
+            if optimum_is_full_ensemble:
+                min = size_means[0]
+                max = size_means[-1]
+            else:
+                min = np.min(size_means)
+                max = np.max(size_means)
             size_means = (size_means - min) / (max - min)
             size_stds = size_stds / (max - min)
         if x is None:
@@ -700,12 +731,20 @@ def plot_uci_ensemble_size_benchmark(
                 fmt="o",
                 alpha=alpha,
             )
-        ax.plot(x + x_add_jitter, size_means, c=color, alpha=alpha, label=label)
-    if pareto_point:
-        ax.scatter(10, 0.2, c="k", label="80/20 point")
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.set_xlim(x_lim)
-    ax.legend()
+        ax.plot(
+            x + x_add_jitter,
+            size_means,
+            c=color,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            alpha=alpha,
+            label=label,
+        )
+    ax.set_xlabel(x_label, fontsize=11)
+    ax.set_ylabel(y_label, fontsize=11)
+    if x_lim is not None:
+        ax.set_xlim(x_lim)
+    if legend:
+        ax.legend()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")

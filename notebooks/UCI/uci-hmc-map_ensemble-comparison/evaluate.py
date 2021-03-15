@@ -1,6 +1,7 @@
 # %load_ext autoreload
 # %autoreload 2
 
+import pickle
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -24,23 +25,19 @@ from data.uci import load_uci_data
 
 tfd = tfp.distributions
 
-figure_dir = "figures/temp"
-figure_dir = Path(figure_dir)
-figure_dir.mkdir(parents=True, exist_ok=True)
 
 # %%
-dataset = "yacht"
+dataset = "concrete"
 data_seed = 0
 dataset_name = f"{dataset}_{data_seed + 1:02}"
 
-n_hidden_layers = 2
+n_hidden_layers = 1
 hidden_layers_string = (
     "two-hidden-layers" if n_hidden_layers == 2 else "one-hidden-layer"
 )
 
 save_dir = f".save_uci_models/hmc-map-ensemble-comparison/{hidden_layers_string}/{dataset_name}"
 save_dir = Path(save_dir)
-save_dir.mkdir(parents=True, exist_ok=True)
 
 
 _x, _y, train_indices, _, test_indices = load_uci_data(f"{dataset}")
@@ -100,6 +97,7 @@ hmc_net = hmc_density_network_from_save_path(
     save_path, network_prior=network_prior, noise_scale_prior=noise_scale_prior
 )
 
+hmc_net._chain[0].shape
 # %%
 ensemble = map_density_ensemble_from_save_path(
     (save_dir.joinpath(f"large_map_ensemble")), noise_scale_prior=noise_scale_prior
@@ -128,7 +126,7 @@ llb_nets = llb_ensemble.networks
 
 
 # %%
-n_predictive_samples = 1000
+n_predictive_samples = 2000
 hmc_predictive_distribution = hmc_net.predict(x_test, thinning=2)
 hmc_predictive_samples = np.squeeze(
     hmc_predictive_distribution.sample(n_predictive_samples).numpy()
@@ -279,126 +277,31 @@ large_llb_wd = wasserstein_distance_predictive_samples(
     hmc_predictive_samples, ensemble_predictive_samples
 )
 
-
 # %%
-def plot_results(ensemble_sizes, results, fig=None, ax=None, label=None):
-    if fig is None:
-        fig, ax = plt.subplots()
-    results = np.array(results)
-    size_means = np.mean(results, axis=0)
-    size_stds = np.std(results, axis=0)
-    ax.errorbar(
-        ensemble_sizes,
-        size_means,
-        size_stds / np.sqrt(results.shape[0]),
-        fmt="o",
-        label=label,
-    )
-
-
-# %%
-wspace = 0.08
-
-fig = plt.figure()
-ax = brokenaxes(
-    xlims=(
-        (-2, 53),
-        (ensemble_sizes[-3] - 3, ensemble_sizes[-3] + 3),
-        (ensemble_sizes[-2] - 3, ensemble_sizes[-2] + 3),
-        (ensemble_sizes[-1] - 3, ensemble_sizes[-1] + 5),
-    ),
-    wspace=wspace,
-    despine=False,
+save_dic = dict(
+    ensemble_sizes=ensemble_sizes,
+    ensemble_rmsess=ensemble_rmsess,
+    ensemble_nllss=ensemble_nllss,
+    ensemble_wdss=ensemble_wdss,
+    llb_ensemble_rmsess=llb_ensemble_rmsess,
+    llb_ensemble_nllss=llb_ensemble_nllss,
+    llb_ensemble_wdss=llb_ensemble_wdss,
+    hmc_ensemble_rmsess=hmc_ensemble_rmsess,
+    hmc_ensemble_nllss=hmc_ensemble_nllss,
+    hmc_ensemble_wdss=hmc_ensemble_wdss,
+    hmc_rmse=hmc_rmse,
+    hmc_nll=hmc_nll,
+    hmc_wd=hmc_wd,
+    large_rmse=large_rmse,
+    large_nll=large_nll,
+    large_wd=large_wd,
+    large_llb_rmse=large_llb_rmse,
+    large_llb_nll=large_llb_nll,
+    large_llb_wd=large_llb_wd,
 )
-plot_results(ensemble_sizes[:-2], ensemble_rmsess, fig=fig, ax=ax, label="MAP Ensemble")
-plot_results(
-    ensemble_sizes[:-2], llb_ensemble_rmsess, fig=fig, ax=ax, label="LLB Ensemble"
-)
-plot_results(ensemble_sizes, hmc_ensemble_rmsess, fig=fig, ax=ax, label="HMC Samples")
-ax.hlines(
-    hmc_rmse, ensemble_sizes[0], ensemble_sizes[-1] + 3, color="k", label="Full HMC"
-)
-ax.scatter(1000, large_rmse)
-ax.scatter(1000, large_llb_rmse)
-ax.set_title(f"{dataset_name}; RMSE")
-ax.set_xlabel("# Ensemble Members")
-ax.set_ylabel("RMSE")
-ax.legend()
-fig.savefig(
-    figure_dir.joinpath(
-        f"{dataset_name}_{hidden_layers_string}_HMC-Map-Ensemble-RMSE.pdf"
-    ),
-    bbox_inches="tight",
-)
-
-
-# %%
-fig = plt.figure()
-ax = brokenaxes(
-    xlims=(
-        (-2, 53),
-        (ensemble_sizes[-3] - 3, ensemble_sizes[-3] + 3),
-        (ensemble_sizes[-2] - 3, ensemble_sizes[-2] + 3),
-        (ensemble_sizes[-1] - 3, ensemble_sizes[-1] + 5),
-    ),
-    wspace=wspace,
-    despine=False,
-)
-plot_results(ensemble_sizes[:-2], ensemble_nllss, fig=fig, ax=ax, label="MAP Ensemble")
-plot_results(
-    ensemble_sizes[:-2], llb_ensemble_nllss, fig=fig, ax=ax, label="LLB Ensemble"
-)
-plot_results(ensemble_sizes, hmc_ensemble_nllss, fig=fig, ax=ax, label="HMC Samples")
-ax.hlines(
-    hmc_nll, ensemble_sizes[0], ensemble_sizes[-1] + 3, color="k", label="Full HMC"
-)
-ax.scatter(1000, large_nll)
-ax.scatter(1000, large_llb_nll)
-ax.set_title(f"{dataset_name}; Negative Log Likelihood")
-ax.set_xlabel("# Ensemble Members")
-ax.set_ylabel("Negative Log Likelihood")
-ax.set_ylim([None, 4])
-ax.legend()
-fig.savefig(
-    figure_dir.joinpath(
-        f"{dataset_name}_{hidden_layers_string}_HMC-Map-Ensemble-LL.pdf"
-    ),
-    bbox_inches="tight",
-)
-
-
-# %%
-fig = plt.figure()
-ax = brokenaxes(
-    xlims=(
-        (-2, 53),
-        (ensemble_sizes[-3] - 3, ensemble_sizes[-3] + 3),
-        (ensemble_sizes[-2] - 3, ensemble_sizes[-2] + 3),
-        (ensemble_sizes[-1] - 3, ensemble_sizes[-1] + 5),
-    ),
-    wspace=wspace,
-    despine=False,
-)
-plot_results(ensemble_sizes[:-2], ensemble_wdss, fig=fig, ax=ax, label="MAP Ensemble")
-plot_results(
-    ensemble_sizes[:-2], llb_ensemble_wdss, fig=fig, ax=ax, label="LLB Ensemble"
-)
-plot_results(ensemble_sizes, hmc_ensemble_wdss, fig=fig, ax=ax, label="HMC Samples")
-ax.hlines(
-    hmc_wd, ensemble_sizes[0], ensemble_sizes[-1] + 3, color="k", label="Full HMC"
-)
-ax.scatter(1000, large_wd)
-ax.scatter(1000, large_llb_wd)
-ax.set_title(f"{dataset_name}; Predictive Wasserstein Distance")
-ax.set_xlabel("# Ensemble Members")
-ax.set_ylabel("Wasserstein Distance")
-ax.legend()
-fig.savefig(
-    figure_dir.joinpath(
-        f"{dataset_name}_{hidden_layers_string}_HMC-Map-Ensemble-predictive-WD.pdf"
-    ),
-    bbox_inches="tight",
-)
+save_path = save_dir.joinpath(f"evaluation_results")
+with open(save_path, "wb") as f:
+    pickle.dump(save_dic, f, -1)
 
 
 # # %% markdown
