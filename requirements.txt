@@ -80,7 +80,7 @@ pathspec==0.7.0
 pep8==1.7.1
 pexpect==4.8.0
 pickleshare==0.7.5
-Pillow==8.0.1
+Pillow==9.3.0
 plotly==4.5.4
 POT @ git+https://github.com/PythonOT/POT.git@4eff97b32987e217ab7d06c79a443678de377cca
 pre-commit==2.2.0
